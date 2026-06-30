@@ -31,7 +31,13 @@ export function readTasks(): Task[] {
 
 function writeTasks(tasks: Task[]) {
   ensure();
-  fs.writeFileSync(FILE, JSON.stringify(tasks, null, 2), "utf8");
+  // Atomic write: serialize to a temp file then rename over the target. Rename
+  // is atomic within a filesystem, so a reader never sees a partial file and a
+  // crash mid-write leaves either the old or the new complete file — never a
+  // truncated one that would parse-fail and wipe the task list.
+  const tmp = path.join(DATA_DIR, `tasks.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(tasks, null, 2), "utf8");
+  fs.renameSync(tmp, FILE);
 }
 
 function id(): string {

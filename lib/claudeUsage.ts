@@ -62,7 +62,7 @@ function listJsonlFiles(): string[] {
   return files;
 }
 
-function parseFile(filePath: string): Entry[] {
+function parseFile(filePath: string, mtimeMs: number): Entry[] {
   let raw: string;
   try {
     raw = fs.readFileSync(filePath, "utf8");
@@ -104,7 +104,11 @@ function parseFile(filePath: string): Entry[] {
     }
 
     const tokens = { inputTokens, outputTokens, cacheReadTokens, cacheWrite5mTokens, cacheWrite1hTokens };
-    const ts = Date.parse((obj.timestamp as string) || "") || 0;
+    // Fall back to the file's mtime (not epoch 0) for a missing/garbled
+    // timestamp, so the row still lands in a real day bucket and totals stay
+    // consistent with the daily/today series.
+    const parsedTs = Date.parse((obj.timestamp as string) || "");
+    const ts = Number.isFinite(parsedTs) ? parsedTs : mtimeMs;
     const cwd = (obj.cwd as string) || "";
     const project = cwd ? path.basename(cwd) : path.basename(path.dirname(filePath));
     const id = (message?.id as string) || "";
@@ -139,7 +143,7 @@ function loadAllEntries(): { entries: Entry[]; fileCount: number } {
       all.push(...cached.entries);
       continue;
     }
-    const entries = parseFile(f);
+    const entries = parseFile(f, stat.mtimeMs);
     fileCache.set(f, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
     all.push(...entries);
   }
@@ -174,14 +178,21 @@ export type UsageSummary = {
 export function getUsageSummary(): UsageSummary {
   const { entries: raw, fileCount } = loadAllEntries();
 
-  // Dedup: the same assistant message can appear in multiple transcript files.
-  const seen = new Set<string>();
+  // Dedup: the same assistant message can be logged multiple times — first as a
+  // streaming/partial row (small output_tokens) and later as the final, complete
+  // row. Keep the row with the largest output_tokens per (message id, requestId)
+  // so output tokens and output cost aren't undercounted.
+  const byKey = new Map<string, Entry>();
   const entries: Entry[] = [];
   for (const e of raw) {
-    if (e.dedupKey !== ":" && seen.has(e.dedupKey)) continue;
-    if (e.dedupKey !== ":") seen.add(e.dedupKey);
-    entries.push(e);
+    if (e.dedupKey === ":") {
+      entries.push(e); // no message id / requestId — can't dedup, keep as-is
+      continue;
+    }
+    const prev = byKey.get(e.dedupKey);
+    if (!prev || e.outputTokens > prev.outputTokens) byKey.set(e.dedupKey, e);
   }
+  entries.push(...byKey.values());
 
   const totals = {
     costUSD: 0,

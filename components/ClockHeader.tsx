@@ -26,6 +26,9 @@ export function ClockHeader({ name = "Pulkit" }: { name?: string }) {
     ? now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
     : "";
   const hour = now ? now.getHours() : 9;
+  // Gate behind `now` too — resolving the zone during SSR would emit the
+  // server's timezone and mismatch the browser's on hydration.
+  const tz = now ? Intl.DateTimeFormat().resolvedOptions().timeZone : "";
 
   return (
     <header className="relative z-10 flex flex-wrap items-end justify-between gap-4 mb-6">
@@ -44,7 +47,7 @@ export function ClockHeader({ name = "Pulkit" }: { name?: string }) {
       <div className="text-right">
         <div className="tnum text-3xl sm:text-4xl font-medium text-[var(--text)] glow-text">{time}</div>
         <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--faint)]">
-          {Intl.DateTimeFormat().resolvedOptions().timeZone}
+          {tz || " "}
         </div>
       </div>
     </header>

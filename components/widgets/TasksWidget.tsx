@@ -36,27 +36,45 @@ export function TasksWidget() {
     const t = title.trim();
     if (!t) return;
     setTitle("");
-    const res = await fetch("/api/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: t, priority }),
-    });
-    const json = await res.json();
-    if (json.task) setTasks((prev) => [json.task, ...prev]);
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: t, priority }),
+      });
+      if (!res.ok) throw new Error(`POST failed: ${res.status}`);
+      const json = await res.json();
+      if (json.task) setTasks((prev) => [json.task, ...prev]);
+    } catch {
+      setTitle(t); // restore the typed task so it isn't silently dropped
+    }
   }
 
   async function toggle(task: Task) {
-    setTasks((prev) => prev.map((x) => (x.id === task.id ? { ...x, done: !x.done } : x)));
-    await fetch("/api/tasks", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: task.id, done: !task.done }),
-    });
+    const next = !task.done;
+    setTasks((prev) => prev.map((x) => (x.id === task.id ? { ...x, done: next } : x)));
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: task.id, done: next }),
+      });
+      if (!res.ok) throw new Error(`PATCH failed: ${res.status}`);
+    } catch {
+      // revert on failure so the UI matches the server
+      setTasks((prev) => prev.map((x) => (x.id === task.id ? { ...x, done: !next } : x)));
+    }
   }
 
   async function remove(task: Task) {
+    const snapshot = tasks;
     setTasks((prev) => prev.filter((x) => x.id !== task.id));
-    await fetch(`/api/tasks?id=${encodeURIComponent(task.id)}`, { method: "DELETE" });
+    try {
+      const res = await fetch(`/api/tasks?id=${encodeURIComponent(task.id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`DELETE failed: ${res.status}`);
+    } catch {
+      setTasks(snapshot); // restore the original list/order on failure
+    }
   }
 
   const open = tasks.filter((t) => !t.done);
