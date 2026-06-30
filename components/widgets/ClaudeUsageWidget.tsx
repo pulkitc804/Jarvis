@@ -95,9 +95,9 @@ export function ClaudeUsageWidget() {
 
   return (
     <Panel
-      title="Claude Usage"
+      title="Cost & Tokens"
       icon={<ActivityIcon size={16} />}
-      className="lg:col-span-7 lg:row-span-2"
+      className="lg:col-span-7"
       right={
         <button
           onClick={refresh}

@@ -150,6 +150,78 @@ function loadAllEntries(): { entries: Entry[]; fileCount: number } {
   return { entries: all, fileCount: files.length };
 }
 
+const FIVE_H_MS = 5 * 60 * 60 * 1000;
+
+export type SessionWindow = {
+  active: boolean;
+  startedAt: number | null;
+  resetsAt: number | null;
+  tokens: number;
+  messages: number;
+  costUSD: number;
+  // Largest token usage seen in any past 5h block — a reference point, NOT the
+  // official Anthropic cap (which isn't published as a token number).
+  peakTokens: number;
+};
+
+/**
+ * Reconstructs the current 5-hour session window the way Anthropic's plans work:
+ * a window starts at your first message and lasts 5 hours; a >5h idle gap (or
+ * the 5h elapsing) begins a new one. Everything here is derived from real local
+ * timestamps — the reset countdown is exact.
+ */
+function computeSession(entries: Entry[], now: number): SessionWindow {
+  const sorted = entries.filter((e) => e.ts > 0).sort((a, b) => a.ts - b.ts);
+  type Block = { start: number; last: number; tokens: number; messages: number; cost: number };
+  const blocks: Block[] = [];
+  let cur: Block | null = null;
+  for (const e of sorted) {
+    const tok =
+      e.inputTokens + e.outputTokens + e.cacheReadTokens + e.cacheWrite5mTokens + e.cacheWrite1hTokens;
+    if (!cur || e.ts - cur.start >= FIVE_H_MS || e.ts - cur.last >= FIVE_H_MS) {
+      cur = { start: e.ts, last: e.ts, tokens: 0, messages: 0, cost: 0 };
+      blocks.push(cur);
+    }
+    cur.last = e.ts;
+    cur.tokens += tok;
+    cur.messages += 1;
+    cur.cost += e.costUSD;
+  }
+  const peakTokens = blocks.reduce((m, b) => Math.max(m, b.tokens), 0);
+  const lastBlock = blocks[blocks.length - 1];
+  if (lastBlock && now < lastBlock.start + FIVE_H_MS) {
+    return {
+      active: true,
+      startedAt: lastBlock.start,
+      resetsAt: lastBlock.start + FIVE_H_MS,
+      tokens: lastBlock.tokens,
+      messages: lastBlock.messages,
+      costUSD: lastBlock.cost,
+      peakTokens,
+    };
+  }
+  return { active: false, startedAt: null, resetsAt: null, tokens: 0, messages: 0, costUSD: 0, peakTokens };
+}
+
+/** Reads the plan tier from ~/.claude.json (e.g. "Claude Max 5×"). */
+function detectPlan(): string {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude.json"), "utf8"));
+    const acct = cfg?.oauthAccount || {};
+    const tier: string = acct.organizationRateLimitTier || acct.userRateLimitTier || "";
+    const map: Record<string, string> = {
+      default_claude_max_20x: "Claude Max 20×",
+      default_claude_max_5x: "Claude Max 5×",
+      default_claude_pro: "Claude Pro",
+    };
+    if (map[tier]) return map[tier];
+    if (tier) return tier.replace(/^default_/, "").replace(/_/g, " ");
+    return "Claude";
+  } catch {
+    return "Claude";
+  }
+}
+
 export type UsageSummary = {
   generatedAt: number;
   meta: {
@@ -168,6 +240,9 @@ export type UsageSummary = {
     sessions: number;
   };
   today: { costUSD: number; tokens: number; messages: number };
+  week: { costUSD: number; tokens: number; messages: number };
+  session: SessionWindow;
+  plan: string;
   last7DaysCostUSD: number;
   last30DaysCostUSD: number;
   daily: { date: string; costUSD: number; tokens: number }[];
@@ -214,6 +289,7 @@ export function getUsageSummary(): UsageSummary {
   let last7 = 0;
   let last30 = 0;
   const today = { costUSD: 0, tokens: 0, messages: 0 };
+  const week = { costUSD: 0, tokens: 0, messages: 0 };
   const sessions = new Set<string>();
 
   for (const e of entries) {
@@ -252,10 +328,17 @@ export function getUsageSummary(): UsageSummary {
       today.tokens += tok;
       today.messages += 1;
     }
-    if (e.ts >= now - 7 * day) last7 += e.costUSD;
+    if (e.ts >= now - 7 * day) {
+      last7 += e.costUSD;
+      week.costUSD += e.costUSD;
+      week.tokens += tok;
+      week.messages += 1;
+    }
     if (e.ts >= now - 30 * day) last30 += e.costUSD;
   }
   totals.sessions = sessions.size || fileCount;
+  const session = computeSession(entries, now);
+  const plan = detectPlan();
 
   // Build a continuous 30-day daily series (fill gaps with zeros).
   const daily: { date: string; costUSD: number; tokens: number }[] = [];
@@ -284,6 +367,9 @@ export function getUsageSummary(): UsageSummary {
     },
     totals,
     today,
+    week,
+    session,
+    plan,
     last7DaysCostUSD: last7,
     last30DaysCostUSD: last30,
     daily,

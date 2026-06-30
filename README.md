@@ -1,91 +1,94 @@
 # Jarvis — personal command center
 
 A live, always-open dashboard for your Mac that pulls **everything you track into one place**:
-Claude usage, tasks, meetings, and email. Local-first, fast to iterate on, and built to keep
-open all day.
+your Claude **session limit**, tasks, meetings, email, and Telegram. Local-first, fast to iterate
+on, and built to keep open all day.
 
-![status: Claude usage is live](https://img.shields.io/badge/Claude_usage-live-3ce0ff)
+![session limit](https://img.shields.io/badge/session_limit-live-3ce0ff)
 ![local-first](https://img.shields.io/badge/local--first-yes-46e08a)
 
 ## What's in it
 
 | Panel | Status | Source |
 | --- | --- | --- |
-| **Claude usage** | ✅ Live | Reads your local `~/.claude/projects/**/*.jsonl` logs — real tokens & cost, no API key |
-| **Tasks** | ✅ Live | Local file-backed store (`data/tasks.json`), full add / complete / delete |
-| **Meetings** | 🔌 Ready to connect | Google Calendar + Granola (see below) |
-| **Email** | 🔌 Ready to connect | Gmail (see below) |
+| **Session limit** | ✅ Live | Your real 5-hour session window from local `~/.claude` logs — countdown ticks every second. Shows the true Anthropic % when an OAuth token is provided. |
+| **Cost & tokens** | ✅ Live | Token/cost detail from the same logs (cache-tier-accurate) |
+| **Tasks** | ✅ Live | Local file-backed store (`data/tasks.json`) |
+| **Meetings** | 🔌 Connect | Any calendar's secret iCal URL (Google / Outlook / Apple) |
+| **Email** | 🔌 Connect | Gmail (or any IMAP) via an app password |
+| **Telegram** | 🔌 Connect | Telegram Bot API |
 
-The Claude-usage numbers are **verifiable**: the panel footer shows exactly how many local log
-files and records were parsed, and cost is computed from published per-token rates with the real
-cache-tier multipliers (read 0.1×, 5-minute write 1.25×, 1-hour write 2×). Cross-check any number
-against the raw files in `~/.claude/projects` or a tool like [`ccusage`](https://github.com/ryoppippi/ccusage).
+### About the session limit
+
+Anthropic does **not** publish your plan's exact token cap, so Jarvis won't invent one. What it
+shows is **accurate**:
+
+- The **5-hour session window** reconstructed from your real message timestamps — when it started,
+  when it resets, and a **per-second countdown** to reset. (Plan detected: e.g. *Claude Max 5×*.)
+- Usage **this session** and **this week** (messages + tokens), straight from your logs.
+- A reference bar: this session **vs your own busiest 5-hour window**, clearly labeled (not the
+  official cap).
+- The **true Anthropic 5h / weekly %** — the exact figures Claude Code's `/usage` shows — *if* you
+  provide an OAuth token (see below). Otherwise it says so plainly rather than guessing.
 
 ## Run it
 
 ```bash
 npm install
-npm run dev
+cp .env.local.example .env.local   # then fill in what you want to connect
+npm run dev                        # → http://localhost:3000
 ```
 
-Then open <http://localhost:3000>.
+### Keep it always open
 
-### Keep it always open on your Mac
-
-Two easy options:
-
-1. **Pin as a Mac app (PWA):** open the page in Chrome → ⋮ → *Cast, save & share* → *Install page as app*. It gets its own Dock icon and window.
-2. **Run for real in the background:**
-   ```bash
-   npm run build && npm run start   # production server on :3000
-   ```
-   Pair with a launchd plist or `pm2 start "npm run start"` so it survives reboots.
+- **Pin as a Mac app:** open in Chrome → ⋮ → *Cast, save & share* → *Install page as app*.
+- **Background server:** `npm run build && npm run start`, optionally under `pm2` or a launchd plist.
 
 ## Connecting data sources
 
-Each not-yet-live panel reads a single API route that currently returns `{ connected: false }`.
-Wire up the real source by returning data in the documented shape — the UI already renders it.
+Everything below is read **server-side only** and lives in `.env.local` (gitignored — secrets never
+leave your machine). See [`.env.local.example`](.env.local.example) for the exact variables.
 
-- **Claude usage** — no setup; it reads `~/.claude/projects`. If you also have a Claude **API**
-  org key, the Admin usage API can be added later for first-party API spend.
-- **Tasks** — already live and local. Swap `lib/tasksStore.ts` for a Linear/Todoist client to sync.
-- **Meetings** — edit [`app/api/meetings/route.ts`](app/api/meetings/route.ts): return `meetings[]`
-  from the Google Calendar API (OAuth) and/or the Granola MCP.
-- **Email** — edit [`app/api/email/route.ts`](app/api/email/route.ts): return `messages[]` and
-  `unread` from the Gmail API (OAuth).
+| Panel | What to add | Where to get it |
+| --- | --- | --- |
+| **Official Claude %** | `CLAUDE_CODE_OAUTH_TOKEN` | A Claude OAuth token (`sk-ant-oat01-…`). On macOS you can instead set `CLAUDE_OAUTH_FROM_KEYCHAIN=1` to read it from the Claude Code keychain item at runtime. Tokens expire, so this is optional polish on top of the always-accurate local window. |
+| **Meetings** | `CALENDAR_ICS_URLS` | Google Calendar → Settings → your calendar → **Secret address in iCal format**. Comma-separate multiple calendars. Works with Outlook/Apple published URLs too. Recurring events are expanded correctly. |
+| **Email** | `GMAIL_IMAP_USER` + `GMAIL_IMAP_APP_PASSWORD` | A Google **App Password** (Account → Security → App passwords; needs 2-Step Verification). Non-Gmail: `IMAP_HOST` / `IMAP_PORT` / `IMAP_USER` / `IMAP_PASSWORD`. |
+| **Telegram** | `TELEGRAM_BOT_TOKEN` | Create a bot via **@BotFather**. A bot sees messages sent *to it* and in groups/channels it's in — not your personal DMs with others (Telegram doesn't expose those to bots). |
+
+Until a panel is configured it shows an honest "Not connected" state with the exact variable to set.
 
 ## Architecture
 
 ```
 app/
-  page.tsx                 # dashboard composition (grid of panels)
-  layout.tsx               # fonts + metadata
-  globals.css              # Jarvis HUD theme (dark, cyan accent)
+  page.tsx                 # dashboard grid (session hero on top)
   api/
-    claude-usage/route.ts  # parses local Claude logs        (live)
-    tasks/route.ts         # file-backed task CRUD            (live)
-    meetings/route.ts      # stub with documented shape       (connect)
-    email/route.ts         # stub with documented shape       (connect)
+    claude-usage/route.ts  # session window + cost/tokens (live, local logs)
+    usage-limit/route.ts   # official Anthropic % via /api/oauth/usage (if token)
+    tasks/route.ts         # file-backed task CRUD
+    meetings/route.ts      # iCal calendars
+    email/route.ts         # IMAP inbox
+    telegram/route.ts      # Telegram Bot API
 lib/
-  pricing.ts               # per-model rates + cache multipliers
-  claudeUsage.ts           # log parser + aggregation (mtime-cached)
-  tasksStore.ts            # JSON-file task store
-  usePoll.ts               # polling hook (pauses when tab hidden)
-  format.ts                # number / currency / relative-time helpers
+  claudeUsage.ts           # log parser, 5h-window reconstruction, cost math
+  officialUsage.ts         # OAuth usage endpoint reader (server-side token)
+  meetingsSource.ts        # node-ical fetch + recurrence expansion
+  emailSource.ts           # imapflow inbox reader
+  telegramSource.ts        # Bot API getUpdates
+  pricing.ts · tasksStore.ts · usePoll.ts · format.ts
 components/
-  ClockHeader.tsx          # live clock + greeting
-  Panel.tsx                # reusable card shell
-  widgets/                 # one component per panel
+  ClockHeader.tsx · Panel.tsx · Gauge.tsx · widgets/*
 ```
 
-Built with **Next.js 16** (App Router) + **Tailwind CSS v4**. Everything refreshes on a poll, so
-the dashboard stays live while it's open. Iterate freely.
+Next.js 16 (App Router) + Tailwind v4. The session countdown ticks client-side every second;
+usage and integrations poll on intervals and pause when the tab is hidden.
 
-## Adding a new panel
+## Add a new panel
 
-1. Create `app/api/<thing>/route.ts` returning your data.
-2. Create `components/widgets/<Thing>Widget.tsx` (copy an existing one; use the `usePoll` hook).
-3. Add `<ThingWidget />` to the grid in `app/page.tsx` with a `lg:col-span-*` class.
+1. `app/api/<thing>/route.ts` returning your data.
+2. `components/widgets/<Thing>Widget.tsx` (copy one; use the `usePoll` hook).
+3. Add it to the grid in `app/page.tsx` with a `lg:col-span-*`.
 
 ---
 
