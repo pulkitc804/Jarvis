@@ -187,9 +187,13 @@ function computeSession(entries: Entry[], now: number): SessionWindow {
     cur.messages += 1;
     cur.cost += e.costUSD;
   }
-  const peakTokens = blocks.reduce((m, b) => Math.max(m, b.tokens), 0);
   const lastBlock = blocks[blocks.length - 1];
-  if (lastBlock && now < lastBlock.start + FIVE_H_MS) {
+  const isActive = !!lastBlock && now < lastBlock.start + FIVE_H_MS;
+  // Peak = busiest PAST 5h block (exclude the active one, so "vs your busiest
+  // session" compares against prior sessions instead of pinning to 100%).
+  const pastBlocks = isActive ? blocks.slice(0, -1) : blocks;
+  const peakTokens = pastBlocks.reduce((m, b) => Math.max(m, b.tokens), 0);
+  if (isActive) {
     return {
       active: true,
       startedAt: lastBlock.start,

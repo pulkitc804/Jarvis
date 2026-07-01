@@ -56,6 +56,11 @@ export function SessionLimitWidget() {
   const plan = data?.plan || "Claude";
   const officialOk = official?.available === true;
   const fiveHour = officialOk ? official.fiveHour : null;
+  // `session.active` is a server snapshot refreshed only every 10s — derive
+  // liveness from the live clock so a just-reset window flips immediately.
+  const sessionActive = !!(
+    session?.active && (session.resetsAt == null || !nowMs || nowMs < session.resetsAt)
+  );
 
   // Headline ring: official 5h utilization if we have it, else time elapsed in the window.
   let ringPct = 0;
@@ -70,9 +75,9 @@ export function SessionLimitWidget() {
     centerMain = `${Math.round(ringPct)}%`;
     centerSub = "5h limit used";
     resetMs = fiveHour.resetsAt;
-  } else if (session?.active && session.startedAt && session.resetsAt) {
+  } else if (sessionActive && session?.startedAt && session.resetsAt) {
     const elapsed = nowMs ? nowMs - session.startedAt : 0;
-    ringPct = (elapsed / FIVE_H_MS) * 100;
+    ringPct = Math.max(0, Math.min(100, (elapsed / FIVE_H_MS) * 100));
     ringColor = "var(--accent)";
     resetMs = session.resetsAt;
     centerMain = `${Math.round(ringPct)}%`;
@@ -110,10 +115,10 @@ export function SessionLimitWidget() {
             {/* Big live countdown */}
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--faint)]">
-                {session?.active ? "Session resets in" : "Next session window"}
+                {sessionActive ? "Session resets in" : "Next session window"}
               </div>
               <div className="tnum text-3xl font-semibold text-[var(--text)]">
-                {remainingMs != null ? fmtCountdown(remainingMs) : session?.active ? "—:—:—" : "full 5:00:00"}
+                {remainingMs != null ? fmtCountdown(remainingMs) : sessionActive ? "—:—:—" : "full 5:00:00"}
               </div>
             </div>
 
@@ -121,9 +126,9 @@ export function SessionLimitWidget() {
               <div className="rounded-lg border border-[var(--border)] px-3 py-2">
                 <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">This session</div>
                 <div className="tnum mt-0.5 text-lg font-semibold text-[var(--text)]">
-                  {session?.active ? session.messages.toLocaleString() : 0} <span className="text-[12px] font-normal text-[var(--muted)]">msgs</span>
+                  {sessionActive ? session.messages.toLocaleString() : 0} <span className="text-[12px] font-normal text-[var(--muted)]">msgs</span>
                 </div>
-                <div className="tnum text-[11px] text-[var(--muted)]">{formatTokens(session?.active ? session.tokens : 0)} tokens</div>
+                <div className="tnum text-[11px] text-[var(--muted)]">{formatTokens(sessionActive ? session.tokens : 0)} tokens</div>
               </div>
               <div className="rounded-lg border border-[var(--border)] px-3 py-2">
                 <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">This week</div>
