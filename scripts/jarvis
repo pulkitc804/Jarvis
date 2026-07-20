@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Jarvis control script: build, run as a local background service, open as a
+# standalone desktop window. Works when double-clicked from Finder / launchd
+# (hence the explicit PATH — Finder launches with a minimal environment).
+set -euo pipefail
+
+export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$HOME/.npm-global/bin:$PATH"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PORT="${JARVIS_PORT:-3000}"
+URL="http://localhost:$PORT"
+PID_FILE="$REPO_DIR/.jarvis.pid"
+LOG_FILE="$REPO_DIR/.jarvis.log"
+PROFILE_DIR="$HOME/Library/Application Support/JarvisApp"
+NEXT="$REPO_DIR/node_modules/.bin/next"
+
+is_up() { curl -sf -o /dev/null "$URL" 2>/dev/null; }
+
+ensure_build() {
+  if [ ! -d "$REPO_DIR/node_modules" ]; then (cd "$REPO_DIR" && npm install); fi
+  if [ ! -d "$REPO_DIR/.next" ]; then (cd "$REPO_DIR" && npm run build); fi
+}
+
+start() {
+  if is_up; then echo "Jarvis is already running → $URL"; return 0; fi
+  ensure_build
+  (cd "$REPO_DIR" && nohup "$NEXT" start -p "$PORT" >"$LOG_FILE" 2>&1 & echo $! >"$PID_FILE")
+  printf "Starting Jarvis"
+  for _ in $(seq 1 60); do is_up && { echo " ✓  $URL"; return 0; }; printf "."; sleep 0.5; done
+  echo " (still warming up — see $LOG_FILE)"
+}
+
+stop() {
+  [ -f "$PID_FILE" ] && kill "$(cat "$PID_FILE")" 2>/dev/null || true
+  rm -f "$PID_FILE"
+  pkill -f "next start -p $PORT" 2>/dev/null || true
+  echo "Jarvis stopped."
+}
+
+open_window() {
+  start
+  if [ -d "/Applications/Google Chrome.app" ]; then
+    open -na "Google Chrome" --args --app="$URL" \
+      --user-data-dir="$PROFILE_DIR" --no-first-run --no-default-browser-check
+  elif [ -d "/Applications/Microsoft Edge.app" ]; then
+    open -na "Microsoft Edge" --args --app="$URL" --user-data-dir="$PROFILE_DIR"
+  else
+    open "$URL"
+  fi
+}
+
+case "${1:-open}" in
+  start)   start ;;
+  stop)    stop ;;
+  restart) stop; start ;;
+  open)    open_window ;;
+  status)  is_up && echo "up  → $URL" || echo "down" ;;
+  *) echo "usage: scripts/jarvis {start|stop|restart|open|status}"; exit 1 ;;
+esac

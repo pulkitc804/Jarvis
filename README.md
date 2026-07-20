@@ -39,10 +39,34 @@ cp .env.local.example .env.local   # then fill in what you want to connect
 npm run dev                        # → http://localhost:3000
 ```
 
-### Keep it always open
+### Run it as a Mac desktop app
 
-- **Pin as a Mac app:** open in Chrome → ⋮ → *Cast, save & share* → *Install page as app*.
-- **Background server:** `npm run build && npm run start`, optionally under `pm2` or a launchd plist.
+Jarvis reads **local** data (your `~/.claude` logs, `.env.local` credentials), so it runs on your
+Mac as a background service — not on a cloud host. One command sets up a real desktop app:
+
+```bash
+npm run install-app     # builds + creates ~/Applications/Jarvis.app
+```
+
+Then open **Jarvis** from Spotlight / `~/Applications` and drag it to your Dock. Double-clicking it
+starts the server (if needed) and opens the dashboard in its **own dedicated window** (no browser
+chrome, its own Dock icon).
+
+Handy commands:
+
+| Command | Does |
+| --- | --- |
+| `npm run desktop` | Start the server (if down) and open the app window |
+| `npm run serve` | Start the background server only → http://localhost:3000 |
+| `scripts/jarvis stop` / `status` | Stop / check the server |
+| `scripts/enable-autostart.sh` | **Opt-in:** keep it running and relaunch on login (macOS LaunchAgent) |
+| `scripts/disable-autostart.sh` | Undo auto-start |
+
+> Prefer no extra app? Open <http://localhost:3000> in Chrome → ⋮ → *Cast, save & share* →
+> *Install page as app* for a one-click PWA instead.
+>
+> Want it reachable from your phone/other devices? Point a private tunnel (Tailscale, or
+> `ngrok http 3000`) at the local server — the data still lives only on your Mac.
 
 ## Connecting data sources
 

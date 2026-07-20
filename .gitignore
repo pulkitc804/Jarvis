@@ -42,3 +42,7 @@ next-env.d.ts
 
 # local personal data (tasks, etc.) — kept off the public repo
 /data/
+
+# launcher runtime files
+/.jarvis.pid
+/.jarvis.log

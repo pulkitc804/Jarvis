@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "serve": "scripts/jarvis start",
+    "desktop": "scripts/jarvis open",
+    "install-app": "bash scripts/install-desktop-app.sh"
   },
   "dependencies": {
     "imapflow": "^1.4.3",
