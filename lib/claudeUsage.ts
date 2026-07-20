@@ -226,6 +226,25 @@ function detectPlan(): string {
   }
 }
 
+// Work you route through a cloud backend (Azure/Foundry, Bedrock, Vertex) so you
+// can keep going past the subscription limit. Tag those projects here; their
+// usage is tracked separately and shown as anonymous aggregate (no project names).
+const CLOUD_PROJECTS = new Set(
+  (process.env.JARVIS_CLOUD_PROJECTS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
+function isCloudEntry(e: Entry): boolean {
+  // Bedrock model IDs carry a provider prefix ("anthropic.claude-…") — always
+  // cloud. Foundry/Vertex use bare IDs, so also honor the tagged project list.
+  if (e.model.includes(".claude") || e.model.startsWith("anthropic.")) return true;
+  return CLOUD_PROJECTS.has(e.project);
+}
+
+export type CloudUsage = { tokens: number; messages: number; costUSD: number; tagged: boolean };
+
 export type UsageSummary = {
   generatedAt: number;
   meta: {
@@ -246,6 +265,7 @@ export type UsageSummary = {
   today: { costUSD: number; tokens: number; messages: number };
   week: { costUSD: number; tokens: number; messages: number };
   session: SessionWindow;
+  cloud: CloudUsage;
   plan: string;
   last7DaysCostUSD: number;
   last30DaysCostUSD: number;
@@ -273,6 +293,25 @@ export function getUsageSummary(): UsageSummary {
   }
   entries.push(...byKey.values());
 
+  // Split subscription (local) usage from cloud/overflow usage. Everything below
+  // (session window, today, week, breakdowns) is subscription-only so the 5h
+  // limit stays accurate; cloud is summarized separately as anonymous aggregate.
+  const entriesAll = entries;
+  const cloudEntries = entriesAll.filter(isCloudEntry);
+  const localEntries = entriesAll.filter((e) => !isCloudEntry(e));
+
+  const cloud: CloudUsage = {
+    tokens: 0,
+    messages: 0,
+    costUSD: 0,
+    tagged: CLOUD_PROJECTS.size > 0,
+  };
+  for (const e of cloudEntries) {
+    cloud.tokens += e.inputTokens + e.outputTokens + e.cacheReadTokens + e.cacheWrite5mTokens + e.cacheWrite1hTokens;
+    cloud.messages += 1;
+    cloud.costUSD += e.costUSD;
+  }
+
   const totals = {
     costUSD: 0,
     totalTokens: 0,
@@ -296,7 +335,7 @@ export function getUsageSummary(): UsageSummary {
   const week = { costUSD: 0, tokens: 0, messages: 0 };
   const sessions = new Set<string>();
 
-  for (const e of entries) {
+  for (const e of localEntries) {
     if (e.session) sessions.add(e.session);
     const writeTokens = e.cacheWrite5mTokens + e.cacheWrite1hTokens;
     const tok = e.inputTokens + e.outputTokens + e.cacheReadTokens + writeTokens;
@@ -341,7 +380,7 @@ export function getUsageSummary(): UsageSummary {
     if (e.ts >= now - 30 * day) last30 += e.costUSD;
   }
   totals.sessions = sessions.size || fileCount;
-  const session = computeSession(entries, now);
+  const session = computeSession(localEntries, now);
   const plan = detectPlan();
 
   // Build a continuous 30-day daily series (fill gaps with zeros).
@@ -373,6 +412,7 @@ export function getUsageSummary(): UsageSummary {
     today,
     week,
     session,
+    cloud,
     plan,
     last7DaysCostUSD: last7,
     last30DaysCostUSD: last30,

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Launch Claude Code against the Azure/Foundry backend so you can keep working
+# after hitting your local subscription session limit. Reads .env.cloud.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="$REPO_DIR/.env.cloud"
+
+if [ ! -f "$ENV_FILE" ]; then
+  echo "Missing $ENV_FILE"
+  echo "→ cp .env.cloud.example .env.cloud   then fill in your Foundry resource + key."
+  exit 1
+fi
+
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "The 'claude' CLI isn't on PATH. Install Claude Code, then re-run."
+  exit 1
+fi
+
+echo "▶  Claude Code → Azure/Foundry backend (resource: ${ANTHROPIC_FOUNDRY_RESOURCE:-?})."
+echo "   Usage bills to Azure, not your subscription. Tag these projects in"
+echo "   .env.local via JARVIS_CLOUD_PROJECTS so Jarvis tracks them anonymously."
+exec claude "$@"

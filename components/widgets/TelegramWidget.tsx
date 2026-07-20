@@ -26,7 +26,7 @@ export function TelegramWidget() {
       title="Telegram"
       icon={<SendIcon size={15} />}
       accent="#34b7f1"
-      className="lg:col-span-5"
+      className="lg:col-span-12"
       right={connected && data.botName ? <span className="text-[11px] text-[var(--muted)]">{data.botName}</span> : undefined}
     >
       {error && <div className="text-sm text-[var(--danger)]">{error}</div>}

@@ -82,6 +82,32 @@ leave your machine). See [`.env.local.example`](.env.local.example) for the exac
 
 Until a panel is configured it shows an honest "Not connected" state with the exact variable to set.
 
+## Keep working past your limit (cloud overflow)
+
+When your subscription 5-hour window is spent, keep going by running Claude Code against a cloud
+backend (Microsoft **Foundry / Azure**, or Bedrock / Vertex). That usage bills to the cloud account,
+**not** your subscription window.
+
+```bash
+cp .env.cloud.example .env.cloud     # fill in your Foundry resource + key
+npm run cloud                        # launches Claude Code on the Azure backend
+```
+
+`.env.cloud` holds the exact variables Claude Code reads for Foundry (`CLAUDE_CODE_USE_FOUNDRY=1`,
+`ANTHROPIC_FOUNDRY_RESOURCE`, `ANTHROPIC_FOUNDRY_API_KEY`, or Azure AD `AZURE_*` auth).
+
+### Tracking it — anonymously
+
+The **Cloud Usage** panel shows how much you've used on the cloud backend as **aggregate volume
+only** — messages and tokens, never project names or content. Cloud usage is kept **out** of your
+subscription 5-hour window so the limit stays accurate.
+
+- Tag your cloud projects in `.env.local`: `JARVIS_CLOUD_PROJECTS=proj-a,proj-b` (matched against
+  the working-directory name). Bedrock's `anthropic.*` model IDs are detected automatically.
+- **What "anonymous" means here:** it's display privacy on *your* dashboard. It does **not** hide
+  anything from the cloud provider's own billing/logs — your Azure admin still sees usage on Azure's
+  side. Jarvis never touches that.
+
 ## Architecture
 
 ```

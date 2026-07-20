@@ -8,7 +8,8 @@
     "start": "next start",
     "serve": "scripts/jarvis start",
     "desktop": "scripts/jarvis open",
-    "install-app": "bash scripts/install-desktop-app.sh"
+    "install-app": "bash scripts/install-desktop-app.sh",
+    "cloud": "scripts/claude-cloud"
   },
   "dependencies": {
     "imapflow": "^1.4.3",

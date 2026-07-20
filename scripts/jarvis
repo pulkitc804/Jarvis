@@ -35,6 +35,9 @@ stop() {
   [ -f "$PID_FILE" ] && kill "$(cat "$PID_FILE")" 2>/dev/null || true
   rm -f "$PID_FILE"
   pkill -f "next start -p $PORT" 2>/dev/null || true
+  # Belt and suspenders: kill whatever still holds the port.
+  local pids; pids="$(lsof -ti tcp:"$PORT" 2>/dev/null || true)"
+  [ -n "$pids" ] && kill $pids 2>/dev/null || true
   echo "Jarvis stopped."
 }
 
