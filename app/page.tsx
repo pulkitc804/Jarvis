@@ -6,6 +6,7 @@ import { TasksWidget } from "@/components/widgets/TasksWidget";
 import { MeetingsWidget } from "@/components/widgets/MeetingsWidget";
 import { EmailWidget } from "@/components/widgets/EmailWidget";
 import { TelegramWidget } from "@/components/widgets/TelegramWidget";
+import { InternshipsWidget } from "@/components/widgets/InternshipsWidget";
 
 export default function Home() {
   return (
@@ -14,6 +15,7 @@ export default function Home() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 auto-rows-min">
         <SessionLimitWidget />
         <CloudUsageWidget />
+        <InternshipsWidget />
         <ClaudeUsageWidget />
         <TasksWidget />
         <MeetingsWidget />
