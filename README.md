@@ -39,34 +39,34 @@ cp .env.local.example .env.local   # then fill in what you want to connect
 npm run dev                        # → http://localhost:3000
 ```
 
-### Run it as a Mac desktop app
+### Run it as a native Mac app
 
-Jarvis reads **local** data (your `~/.claude` logs, `.env.local` credentials), so it runs on your
-Mac as a background service — not on a cloud host. One command sets up a real desktop app:
+It's a real **Electron** desktop app — its own window, its own Dock icon, its own process (not a
+browser). Two ways to get it:
+
+**A. Linked to this folder (quick, recommended):**
 
 ```bash
 npm run install-app     # builds + creates ~/Applications/Jarvis.app
 ```
 
-Then open **Jarvis** from Spotlight / `~/Applications` and drag it to your Dock. Double-clicking it
-starts the server (if needed) and opens the dashboard in its **own dedicated window** (no browser
-chrome, its own Dock icon).
+Open **Jarvis** from Spotlight / `~/Applications` and drag it to your Dock. Double-clicking launches
+a native window running the local server. (`npm run app` runs the same thing from the terminal.)
 
-Handy commands:
+**B. Self-contained bundle (movable, no repo needed to run):**
 
-| Command | Does |
-| --- | --- |
-| `npm run desktop` | Start the server (if down) and open the app window |
-| `npm run serve` | Start the background server only → http://localhost:3000 |
-| `scripts/jarvis stop` / `status` | Stop / check the server |
-| `scripts/enable-autostart.sh` | **Opt-in:** keep it running and relaunch on login (macOS LaunchAgent) |
-| `scripts/disable-autostart.sh` | Undo auto-start |
+```bash
+npm run dist            # → release/mac-arm64/Jarvis.app  (~580 MB, bundles everything)
+```
 
-> Prefer no extra app? Open <http://localhost:3000> in Chrome → ⋮ → *Cast, save & share* →
-> *Install page as app* for a one-click PWA instead.
->
-> Want it reachable from your phone/other devices? Point a private tunnel (Tailscale, or
-> `ngrok http 3000`) at the local server — the data still lives only on your Mac.
+Drag that `Jarvis.app` into `/Applications`.
+
+Handy commands: `npm run serve` (server only, http://localhost:3000), `scripts/jarvis stop|status`,
+`scripts/enable-autostart.sh` (opt-in: relaunch on login).
+
+> **Privacy — keep it on your Mac.** Jarvis reads local files and runs entirely on your machine, so
+> nobody else can see it. Do **not** host it on shared or company infrastructure: anything running
+> on a machine someone else administers is visible to them. Local = yours alone.
 
 ## Connecting data sources
 

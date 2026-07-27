@@ -49,3 +49,9 @@ next-env.d.ts
 # launcher runtime files
 /.jarvis.pid
 /.jarvis.log
+
+# electron build artifacts (icon.svg is the committed source)
+/release
+/electron/icon.png
+/electron/icon.icns
+/electron/*.iconset

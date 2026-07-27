@@ -6,6 +6,7 @@ import { TasksWidget } from "@/components/widgets/TasksWidget";
 import { MeetingsWidget } from "@/components/widgets/MeetingsWidget";
 import { EmailWidget } from "@/components/widgets/EmailWidget";
 import { TelegramWidget } from "@/components/widgets/TelegramWidget";
+import { AzureSpendWidget } from "@/components/widgets/AzureSpendWidget";
 
 export default function Home() {
   return (
@@ -19,6 +20,7 @@ export default function Home() {
         <MeetingsWidget />
         <EmailWidget />
         <TelegramWidget />
+        <AzureSpendWidget />
       </div>
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--faint)]">
         <span>Jarvis · local-first personal command center</span>
