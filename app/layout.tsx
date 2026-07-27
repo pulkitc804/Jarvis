@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -15,6 +15,15 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Jarvis — Command Center",
   description: "A live personal dashboard: Claude usage, tasks, meetings, and email in one place.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "Jarvis", statusBarStyle: "black-translucent" },
+  icons: { apple: "/apple-touch-icon.png" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#05080f",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
