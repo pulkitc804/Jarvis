@@ -26,7 +26,7 @@ type Entry = {
   dedupKey: string;
 };
 
-type FileCache = { mtimeMs: number; size: number; entries: Entry[] };
+type FileCache = { mtimeMs: number; size: number; entries: Entry[]; activity: number[] };
 // Persist across requests in the dev server so polling stays cheap: we only
 // re-read files whose mtime/size changed.
 const fileCache = new Map<string, FileCache>();
@@ -62,17 +62,28 @@ function listJsonlFiles(): string[] {
   return files;
 }
 
-function parseFile(filePath: string, mtimeMs: number): Entry[] {
+function parseFile(filePath: string, mtimeMs: number): { entries: Entry[]; activity: number[] } {
   let raw: string;
   try {
     raw = fs.readFileSync(filePath, "utf8");
   } catch {
-    return [];
+    return { entries: [], activity: [] };
   }
   const out: Entry[] = [];
+  // Every message timestamp (user + assistant) — used to anchor the session
+  // window to your FIRST message, not the first logged assistant response.
+  const activity: number[] = [];
+  const tsRe = /"timestamp":"([^"]+)"/;
   for (const line of raw.split("\n")) {
-    // Cheap pre-filter: skip any line that can't be an assistant usage row.
-    if (line.length < 40 || !line.includes('"input_tokens"')) continue;
+    if (line.length < 20) continue;
+    if (!line.includes('"input_tokens"')) {
+      const m = tsRe.exec(line);
+      if (m) {
+        const t = Date.parse(m[1]);
+        if (Number.isFinite(t)) activity.push(t);
+      }
+      continue;
+    }
     let obj: Record<string, unknown>;
     try {
       obj = JSON.parse(line);
@@ -124,13 +135,15 @@ function parseFile(filePath: string, mtimeMs: number): Entry[] {
       costUSD: costForEntry(model, tokens),
       dedupKey: `${id}:${reqId}`,
     });
+    activity.push(ts);
   }
-  return out;
+  return { entries: out, activity };
 }
 
-function loadAllEntries(): { entries: Entry[]; fileCount: number } {
+function loadAllEntries(): { entries: Entry[]; activity: number[]; fileCount: number } {
   const files = listJsonlFiles();
   const all: Entry[] = [];
+  const activity: number[] = [];
   for (const f of files) {
     let stat: fs.Stats;
     try {
@@ -141,13 +154,15 @@ function loadAllEntries(): { entries: Entry[]; fileCount: number } {
     const cached = fileCache.get(f);
     if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
       all.push(...cached.entries);
+      activity.push(...cached.activity);
       continue;
     }
-    const entries = parseFile(f, stat.mtimeMs);
-    fileCache.set(f, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
-    all.push(...entries);
+    const parsed = parseFile(f, stat.mtimeMs);
+    fileCache.set(f, { mtimeMs: stat.mtimeMs, size: stat.size, entries: parsed.entries, activity: parsed.activity });
+    all.push(...parsed.entries);
+    activity.push(...parsed.activity);
   }
-  return { entries: all, fileCount: files.length };
+  return { entries: all, activity, fileCount: files.length };
 }
 
 const FIVE_H_MS = 5 * 60 * 60 * 1000;
@@ -165,27 +180,34 @@ export type SessionWindow = {
 };
 
 /**
- * Reconstructs the current 5-hour session window the way Anthropic's plans work:
- * a window starts at your first message and lasts 5 hours; a >5h idle gap (or
- * the 5h elapsing) begins a new one. Everything here is derived from real local
- * timestamps — the reset countdown is exact.
+ * Estimates the current 5-hour session window the way Anthropic's plans work:
+ * a window starts at your FIRST message and lasts 5 hours; a >5h idle gap (or
+ * the 5h elapsing) begins a new one. Boundaries come from every message
+ * timestamp (so the start matches your first message, not the first logged
+ * response); token sums come from the usage rows. This is a close estimate —
+ * the exact reset comes from the official usage endpoint when a token is set.
  */
-function computeSession(entries: Entry[], now: number): SessionWindow {
-  const sorted = entries.filter((e) => e.ts > 0).sort((a, b) => a.ts - b.ts);
+function computeSession(entries: Entry[], activity: number[], now: number): SessionWindow {
+  const acts = activity.filter((t) => t > 0).sort((a, b) => a - b);
   type Block = { start: number; last: number; tokens: number; messages: number; cost: number };
   const blocks: Block[] = [];
   let cur: Block | null = null;
-  for (const e of sorted) {
-    const tok =
-      e.inputTokens + e.outputTokens + e.cacheReadTokens + e.cacheWrite5mTokens + e.cacheWrite1hTokens;
-    if (!cur || e.ts - cur.start >= FIVE_H_MS || e.ts - cur.last >= FIVE_H_MS) {
-      cur = { start: e.ts, last: e.ts, tokens: 0, messages: 0, cost: 0 };
+  for (const ts of acts) {
+    if (!cur || ts - cur.start >= FIVE_H_MS || ts - cur.last >= FIVE_H_MS) {
+      cur = { start: ts, last: ts, tokens: 0, messages: 0, cost: 0 };
       blocks.push(cur);
+    } else {
+      cur.last = ts;
     }
-    cur.last = e.ts;
-    cur.tokens += tok;
-    cur.messages += 1;
-    cur.cost += e.costUSD;
+  }
+  // Assign each usage row's tokens to the 5h block that contains it.
+  for (const e of entries) {
+    if (e.ts <= 0) continue;
+    const b = blocks.find((bl) => e.ts >= bl.start && e.ts < bl.start + FIVE_H_MS);
+    if (!b) continue;
+    b.tokens += e.inputTokens + e.outputTokens + e.cacheReadTokens + e.cacheWrite5mTokens + e.cacheWrite1hTokens;
+    b.messages += 1;
+    b.cost += e.costUSD;
   }
   const lastBlock = blocks[blocks.length - 1];
   const isActive = !!lastBlock && now < lastBlock.start + FIVE_H_MS;
@@ -275,7 +297,7 @@ export type UsageSummary = {
 };
 
 export function getUsageSummary(): UsageSummary {
-  const { entries: raw, fileCount } = loadAllEntries();
+  const { entries: raw, activity, fileCount } = loadAllEntries();
 
   // Dedup: the same assistant message can be logged multiple times — first as a
   // streaming/partial row (small output_tokens) and later as the final, complete
@@ -380,7 +402,7 @@ export function getUsageSummary(): UsageSummary {
     if (e.ts >= now - 30 * day) last30 += e.costUSD;
   }
   totals.sessions = sessions.size || fileCount;
-  const session = computeSession(localEntries, now);
+  const session = computeSession(localEntries, activity, now);
   const plan = detectPlan();
 
   // Build a continuous 30-day daily series (fill gaps with zeros).
