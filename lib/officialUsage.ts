@@ -115,6 +115,8 @@ export async function getOfficialUsage(): Promise<OfficialUsage> {
     }).finally(() => clearTimeout(timer));
 
     if (res.status === 401) return { available: false, reason: "Token expired or invalid — sign in to Claude Code." };
+    if (res.status === 403)
+      return { available: false, reason: "This token can't read usage (setup-token tokens lack the scope; only Claude Code's own login token has it)." };
     if (res.status === 429) return { available: false, reason: "Rate limited by Anthropic — try again shortly." };
     if (!res.ok) return { available: false, reason: `Anthropic returned HTTP ${res.status}.` };
 
