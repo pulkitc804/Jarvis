@@ -26,6 +26,7 @@ type Resp = {
   bigTechCount: number;
   appliedCount: number;
   scraperConnected: boolean;
+  aiConfigured: boolean;
 };
 
 function scoreColor(s: number): string {
@@ -191,7 +192,7 @@ export function InternshipTracker() {
                   </div>
                   {j.scoreReason && <div className="truncate text-[10px] text-[var(--faint)]" title={j.scoreReason}>{j.scoreReason}</div>}
                 </div>
-              ) : (
+              ) : data?.aiConfigured ? (
                 <button
                   onClick={() => runScore(j)}
                   disabled={!!busy[j.id]}
@@ -199,12 +200,14 @@ export function InternshipTracker() {
                 >
                   {busy[j.id] === "score" ? "Scoring…" : "Score fit"}
                 </button>
+              ) : (
+                <span className="text-[11px] text-[var(--faint)]">scoring…</span>
               )}
             </div>
 
             {/* actions */}
             <div className="flex shrink-0 items-center gap-2">
-              {j.worthTailoring && !j.tailoredResume && (
+              {j.worthTailoring && !j.tailoredResume && data?.aiConfigured && (
                 <button
                   onClick={() => runTailor(j)}
                   disabled={!!busy[j.id]}
@@ -213,6 +216,11 @@ export function InternshipTracker() {
                 >
                   {busy[j.id] === "tailor" ? "Tailoring…" : "Tailor résumé"}
                 </button>
+              )}
+              {j.worthTailoring && !j.tailoredResume && !data?.aiConfigured && (
+                <span className="rounded-md border border-[var(--accent2)]/30 px-2 py-1 text-[10px] font-medium text-[var(--accent2)]" title="The scraper will generate a tailored résumé on its next run">
+                  ★ tailor queued
+                </span>
               )}
               {j.tailoredResume && (
                 <button onClick={() => setViewTex(j)} className="rounded-md bg-[var(--good)]/15 px-2.5 py-1 text-[11px] font-medium text-[var(--good)] transition hover:bg-[var(--good)]/25">

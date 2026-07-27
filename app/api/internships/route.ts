@@ -1,4 +1,5 @@
 import { listInternships, updateJob } from "@/lib/internships";
+import { aiConfigured } from "@/lib/aiClient";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,9 @@ export async function GET(request: Request) {
     appliedCount: internships.filter((i) => i.applied).length,
     scraperConnected,
     scraperFile,
+    // When false, scoring/tailoring is done automatically by the scraper task
+    // (no on-demand buttons); when true, the in-app Score/Tailor buttons work.
+    aiConfigured: aiConfigured(),
   });
 }
 

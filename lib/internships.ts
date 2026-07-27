@@ -49,7 +49,18 @@ export function isBigTech(company: string): boolean {
   return BIG_TECH.some((t) => n.includes(" " + t + " "));
 }
 
-type ScraperJob = { company: string; role: string; url: string; location?: string; firstSeen?: string };
+type ScraperJob = {
+  company: string;
+  role: string;
+  url: string;
+  location?: string;
+  firstSeen?: string;
+  // Optional AI fields the scraper task writes (free, on the subscription).
+  score?: number;
+  worthTailoring?: boolean;
+  scoreReason?: string;
+  tailoredResume?: string;
+};
 
 export type JobStatus = {
   applied: boolean;
@@ -62,8 +73,12 @@ export type JobStatus = {
   notes: string;
 };
 
-// firstSeen is stored as epoch ms in JobStatus, so drop the scraper's string form.
-export type Internship = Omit<ScraperJob, "firstSeen"> & { id: string; bigTech: boolean } & JobStatus;
+// JobStatus owns firstSeen (number) and the AI fields (nullable), so drop the
+// scraper's own versions of those to avoid type conflicts.
+export type Internship = Omit<ScraperJob, "firstSeen" | "score" | "worthTailoring" | "scoreReason" | "tailoredResume"> & {
+  id: string;
+  bigTech: boolean;
+} & JobStatus;
 
 function readScraperJobs(): ScraperJob[] {
   try {
@@ -121,10 +136,12 @@ export function listInternships(): { internships: Internship[]; scraperConnected
       applied: st.applied ?? false,
       appliedAt: st.appliedAt ?? null,
       firstSeen: st.firstSeen ?? now,
-      score: st.score ?? null,
-      worthTailoring: st.worthTailoring ?? null,
-      scoreReason: st.scoreReason ?? null,
-      tailoredResume: st.tailoredResume ?? null,
+      // Prefer scores the scraper wrote into seen_jobs.json; fall back to any
+      // written by Jarvis's own /api/internships/score (if an API key is added).
+      score: j.score ?? st.score ?? null,
+      worthTailoring: j.worthTailoring ?? st.worthTailoring ?? null,
+      scoreReason: j.scoreReason ?? st.scoreReason ?? null,
+      tailoredResume: j.tailoredResume ?? st.tailoredResume ?? null,
       notes: st.notes ?? "",
     };
   });
