@@ -98,18 +98,12 @@ export function SessionLimitWidget() {
           <div className="min-w-0 flex-1 w-full space-y-3.5">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--faint)]">
-                {officialOk ? "5-hour limit used" : sessionActive ? "Session resets" : "Next window"}
+                {officialOk ? "5-hour limit resets in" : sessionActive ? "Session resets in" : "Next window"}
               </div>
               <div className="tnum text-2xl font-semibold text-[var(--text)]">
-                {officialOk && fiveHour?.usedPct != null
-                  ? `${Math.round(fiveHour.usedPct)}%`
-                  : resetMs
-                    ? `at ${fmtClock(resetMs)}`
-                    : "starts on next use"}
+                {resetMs && nowMs ? fmtCountdown(resetMs - nowMs) : officialOk ? "—" : "starts on next use"}
               </div>
-              {!officialOk && sessionActive && session?.startedAt && (
-                <div className="text-[11px] text-[var(--muted)]">window began {fmtClock(session.startedAt)}</div>
-              )}
+              {resetMs && <div className="text-[11px] text-[var(--muted)]">at {fmtClock(resetMs)}</div>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -135,7 +129,7 @@ export function SessionLimitWidget() {
 
             <div className="text-[10px] leading-relaxed text-[var(--faint)]">
               {officialOk
-                ? "Official Anthropic limits, live."
+                ? "Exact — read live from Claude's own usage data (matches /usage)."
                 : "Real usage from your local logs. Anthropic doesn't expose the exact cap, so this shows what you've actually used and when the 5-hour window resets — not a % of your limit."}
             </div>
           </div>

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { costForEntry, familyForModel } from "./pricing";
+import { readPlanUsage } from "./planUsage";
 
 /**
  * Reads local Claude Code usage logs from ~/.claude/projects/<project>/*.jsonl
@@ -402,7 +403,24 @@ export function getUsageSummary(): UsageSummary {
     if (e.ts >= now - 30 * day) last30 += e.costUSD;
   }
   totals.sessions = sessions.size || fileCount;
-  const session = computeSession(localEntries, activity, now);
+  let session = computeSession(localEntries, activity, now);
+  // If the Claude desktop app's usage cache is present, align the session
+  // window to Anthropic's REAL window start (the log reconstruction can be off
+  // by hours). This keeps msgs/tokens consistent with the official 5h reset.
+  const pu = readPlanUsage();
+  if (pu.available && pu.windowStart) {
+    const ws = pu.windowStart;
+    const win = localEntries.filter((e) => e.ts >= ws);
+    session = {
+      active: now < ws + FIVE_H_MS,
+      startedAt: ws,
+      resetsAt: pu.fiveHourResetsAt ?? ws + FIVE_H_MS,
+      tokens: win.reduce((s, e) => s + e.inputTokens + e.outputTokens + e.cacheReadTokens + e.cacheWrite5mTokens + e.cacheWrite1hTokens, 0),
+      messages: win.length,
+      costUSD: win.reduce((s, e) => s + e.costUSD, 0),
+      peakTokens: session.peakTokens,
+    };
+  }
   const plan = detectPlan();
 
   // Build a continuous 30-day daily series (fill gaps with zeros).
