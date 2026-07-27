@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { triggerRefresh } from "@/lib/refreshBus";
+import { RefreshIcon } from "@/components/icons";
 
 function greeting(h: number): string {
   if (h < 5) return "Burning the midnight oil";
@@ -12,12 +14,19 @@ function greeting(h: number): string {
 
 export function ClockHeader({ name = "Pulkit" }: { name?: string }) {
   const [now, setNow] = useState<Date | null>(null);
+  const [spinning, setSpinning] = useState(false);
 
   useEffect(() => {
     setNow(new Date());
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  function refreshAll() {
+    setSpinning(true);
+    triggerRefresh();
+    setTimeout(() => setSpinning(false), 900);
+  }
 
   const time = now
     ? now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true })
@@ -44,10 +53,18 @@ export function ClockHeader({ name = "Pulkit" }: { name?: string }) {
         </h1>
         <p className="mt-1 text-sm text-[var(--muted)]">{date}</p>
       </div>
-      <div className="text-right">
-        <div className="tnum text-3xl sm:text-4xl font-medium text-[var(--text)] glow-text">{time}</div>
-        <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--faint)]">
-          {tz || " "}
+      <div className="flex items-center gap-4">
+        <button
+          onClick={refreshAll}
+          title="Refresh all panels now"
+          className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-white/[0.02] px-3 py-2 text-[12px] font-medium text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--accent)]"
+        >
+          <RefreshIcon size={14} className={spinning ? "animate-spin" : ""} />
+          <span className="hidden sm:inline">Refresh</span>
+        </button>
+        <div className="text-right">
+          <div className="tnum text-3xl sm:text-4xl font-medium text-[var(--text)] glow-text">{time}</div>
+          <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--faint)]">{tz || " "}</div>
         </div>
       </div>
     </header>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { onRefresh } from "./refreshBus";
 
 type PollState<T> = {
   data: T | null;
@@ -46,9 +47,11 @@ export function usePoll<T>(url: string, intervalMs = 15000): PollState<T> {
       if (document.visibilityState === "visible") load();
     };
     document.addEventListener("visibilitychange", onVis);
+    const offRefresh = onRefresh(load); // central refresh button forces a re-fetch
     return () => {
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVis);
+      offRefresh();
       abortRef.current?.abort();
     };
   }, [load, intervalMs]);

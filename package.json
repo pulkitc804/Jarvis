@@ -19,13 +19,27 @@
     "productName": "Jarvis",
     "asar": true,
     "afterPack": "scripts/afterPack.cjs",
-    "files": ["electron/**/*", "package.json"],
-    "extraResources": [
-      { "from": ".next/standalone", "to": "app" },
-      { "from": ".next/static", "to": "app/.next/static" },
-      { "from": "public", "to": "app/public" }
+    "files": [
+      "electron/**/*",
+      "package.json"
     ],
-    "directories": { "output": "release" },
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "app"
+      },
+      {
+        "from": ".next/static",
+        "to": "app/.next/static"
+      },
+      {
+        "from": "public",
+        "to": "app/public"
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
     "mac": {
       "target": "dir",
       "category": "public.app-category.productivity",
@@ -34,14 +48,18 @@
   },
   "dependencies": {
     "imapflow": "^1.4.3",
+    "mailparser": "^3.9.14",
     "next": "16.2.9",
     "node-ical": "^0.26.1",
+    "nodemailer": "^9.0.3",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^20",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "electron": "^43.2.0",

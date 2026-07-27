@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Panel } from "@/components/Panel";
 import { MailIcon } from "@/components/icons";
 import { ConnectState } from "@/components/widgets/MeetingsWidget";
@@ -27,13 +28,26 @@ export function EmailWidget() {
       icon={<MailIcon size={16} />}
       accent="var(--warn)"
       className="lg:col-span-5"
-      right={connected ? <span className="tnum text-[12px] text-[var(--warn)]">{data.unread} unread</span> : undefined}
+      right={
+        connected ? (
+          <div className="flex items-center gap-3">
+            <span className="tnum text-[12px] text-[var(--warn)]">{data.unread.toLocaleString()} unread</span>
+            <Link href="/mail" className="text-[12px] font-medium text-[var(--accent)] hover:underline">
+              Open →
+            </Link>
+          </div>
+        ) : undefined
+      }
     >
       {error && <div className="text-sm text-[var(--danger)]">{error}</div>}
       {connected && data.messages.length > 0 && (
         <div className="scroll-thin max-h-[260px] space-y-0.5 overflow-y-auto pr-1">
           {data.messages.map((m) => (
-            <div key={m.id} className="flex items-start gap-2.5 rounded-lg px-2 py-2 transition hover:bg-white/[0.025]">
+            <Link
+              key={m.id}
+              href={`/mail?uid=${encodeURIComponent(m.id)}`}
+              className="flex items-start gap-2.5 rounded-lg px-2 py-2 transition hover:bg-white/[0.025]"
+            >
               {m.unread ? (
                 <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--warn)]" />
               ) : (
@@ -48,7 +62,7 @@ export function EmailWidget() {
                 </div>
                 <div className={`truncate text-[13px] ${m.unread ? "text-[var(--text)]" : "text-[var(--muted)]"}`}>{m.subject}</div>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}
