@@ -1,13 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { getDetectedJobs } from "./internshipFetcher";
 
 /**
  * Internship tracker data layer.
- * - Base feed: the scraper's cumulative seen_jobs.json ({company, role, url, ...}).
+ * - Base feed: two sources, merged by apply URL —
+ *     1. the scraper's cumulative seen_jobs.json (scored, 3×/day), and
+ *     2. Jarvis's own data/detected.json (free HTTP tracker fetch, every few
+ *        minutes) so new big-tech roles show up near-instantly, unscored, and
+ *        get enriched with scores once the scraper next runs.
  * - Jarvis overlays per-job state (applied status, dates, AI score, tailored
- *   resume) in data/internships.json, keyed by apply URL — the scraper file is
- *   never modified.
+ *   resume) in data/internships.json, keyed by apply URL — neither feed file is
+ *   modified.
  */
 
 const SCRAPER_FILE = path.join(
@@ -49,6 +54,15 @@ export function isBigTech(company: string): boolean {
   return BIG_TECH.some((t) => n.includes(" " + t + " "));
 }
 
+// The candidate is an undergrad (rising junior). Drop graduate-only roles unless
+// the title also signals bachelor's/undergrad eligibility (e.g. "BS/MS").
+const GRAD_ONLY_RE = /\bph\.?d\b|\bdoctoral\b|\bpost-?doc\b|\bmaster'?s\b|\bmba\b|\bms\b|graduate students?/i;
+const UNDERGRAD_OK_RE = /\bb\.?s\.?\b|\bb\.?a\.?\b|\bbachelor'?s?\b|\bundergrad(uate)?\b|\bsophomore\b|rising junior|\bfreshman\b/i;
+export function isUndergradRole(role: string): boolean {
+  if (!role) return true;
+  return !(GRAD_ONLY_RE.test(role) && !UNDERGRAD_OK_RE.test(role));
+}
+
 type ScraperJob = {
   company: string;
   role: string;
@@ -70,6 +84,8 @@ export type JobStatus = {
   worthTailoring: boolean | null;
   scoreReason: string | null;
   tailoredResume: string | null; // LaTeX/text of tailored resume
+  tailorRequested: boolean; // user asked for a tailored résumé (fulfilled by the scraper)
+  tailorRequestedAt: number | null;
   notes: string;
 };
 
@@ -114,8 +130,21 @@ export function scraperExists(): boolean {
   return fs.existsSync(SCRAPER_FILE);
 }
 
-export function listInternships(): { internships: Internship[]; scraperConnected: boolean; scraperFile: string } {
-  const jobs = readScraperJobs();
+/** Merge the scraper feed (scored) with Jarvis's own detected feed (fast, free). */
+function mergedJobs(): ScraperJob[] {
+  const byId = new Map<string, ScraperJob>();
+  // detected first, so a matching scraper entry overrides it (keeps scores etc.)
+  for (const j of getDetectedJobs()) byId.set(jobId(j), j);
+  for (const j of readScraperJobs()) {
+    const id = jobId(j);
+    byId.set(id, { ...byId.get(id), ...j });
+  }
+  return [...byId.values()];
+}
+
+export function listInternships(): { internships: Internship[]; scraperConnected: boolean; scraperFile: string; detectedCount: number } {
+  const detectedCount = getDetectedJobs().length;
+  const jobs = mergedJobs();
   const map = readStatusMap();
   let dirty = false;
   const now = Date.now();
@@ -142,15 +171,20 @@ export function listInternships(): { internships: Internship[]; scraperConnected
       worthTailoring: j.worthTailoring ?? st.worthTailoring ?? null,
       scoreReason: j.scoreReason ?? st.scoreReason ?? null,
       tailoredResume: j.tailoredResume ?? st.tailoredResume ?? null,
+      tailorRequested: st.tailorRequested ?? false,
+      tailorRequestedAt: st.tailorRequestedAt ?? null,
       notes: st.notes ?? "",
     };
   });
 
   if (dirty) writeStatusMap(map);
 
+  // Undergrad-only: never surface PhD/Masters-only roles regardless of source.
+  const undergrad = internships.filter((j) => isUndergradRole(j.role));
+
   // big tech first, then most-recently-detected
-  internships.sort((a, b) => (a.bigTech === b.bigTech ? b.firstSeen - a.firstSeen : a.bigTech ? -1 : 1));
-  return { internships, scraperConnected: scraperExists(), scraperFile: SCRAPER_FILE };
+  undergrad.sort((a, b) => (a.bigTech === b.bigTech ? b.firstSeen - a.firstSeen : a.bigTech ? -1 : 1));
+  return { internships: undergrad, scraperConnected: scraperExists(), scraperFile: SCRAPER_FILE, detectedCount };
 }
 
 export function updateJob(id: string, patch: Partial<JobStatus>): void {
@@ -160,7 +194,7 @@ export function updateJob(id: string, patch: Partial<JobStatus>): void {
     cur.applied = patch.applied;
     cur.appliedAt = patch.applied ? Date.now() : null;
   }
-  for (const k of ["score", "worthTailoring", "scoreReason", "tailoredResume", "notes", "firstSeen"] as const) {
+  for (const k of ["score", "worthTailoring", "scoreReason", "tailoredResume", "tailorRequested", "tailorRequestedAt", "notes", "firstSeen"] as const) {
     if (patch[k] !== undefined) (cur as Record<string, unknown>)[k] = patch[k];
   }
   map[id] = cur;

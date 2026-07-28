@@ -18,6 +18,8 @@ type Internship = {
   worthTailoring: boolean | null;
   scoreReason: string | null;
   tailoredResume: string | null;
+  tailorRequested: boolean;
+  tailorRequestedAt: number | null;
   notes: string;
 };
 type Resp = {
@@ -26,7 +28,10 @@ type Resp = {
   bigTechCount: number;
   appliedCount: number;
   scraperConnected: boolean;
+  detectedCount: number;
   aiConfigured: boolean;
+  tailoringInstant: boolean; // true = API key set (instant); false = queued to scraper
+  pdfAvailable: boolean;
 };
 
 function scoreColor(s: number): string {
@@ -45,18 +50,25 @@ export function InternshipTracker() {
   const [busy, setBusy] = useState<Record<string, "score" | "tailor">>({});
   const [viewTex, setViewTex] = useState<Internship | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/internships?all=${bigTechOnly ? 0 : 1}`, { cache: "no-store" });
-      setData(await res.json());
-    } finally {
-      setLoading(false);
-    }
-  }, [bigTechOnly]);
+  const load = useCallback(
+    async (force = false) => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/internships?all=${bigTechOnly ? 0 : 1}${force ? "&refresh=1" : ""}`, { cache: "no-store" });
+        setData(await res.json());
+      } finally {
+        setLoading(false);
+      }
+    },
+    [bigTechOnly],
+  );
 
+  // Initial load forces a live tracker fetch; then auto-refresh every 20s so new
+  // roles appear without touching anything.
   useEffect(() => {
-    load();
+    load(true);
+    const t = setInterval(() => load(false), 20000);
+    return () => clearInterval(t);
   }, [load]);
 
   async function toggleApplied(job: Internship) {
@@ -102,8 +114,14 @@ export function InternshipTracker() {
         body: JSON.stringify({ id: job.id }),
       });
       const j = await res.json();
-      if (j.ok) load();
-      else alert(j.error || "Tailoring failed");
+      if (j.ok) {
+        if (j.mode === "queued") {
+          // optimistic: show "requested" until the scraper fills in the résumé
+          setData((d) => (d ? { ...d, internships: d.internships.map((x) => (x.id === job.id ? { ...x, tailorRequested: true } : x)) } : d));
+        } else {
+          load();
+        }
+      } else alert(j.error || "Tailoring failed");
     } finally {
       setBusy((b) => {
         const n = { ...b };
@@ -134,16 +152,22 @@ export function InternshipTracker() {
           >
             {bigTechOnly ? "Big tech only" : "Showing all"}
           </button>
-          <button onClick={load} className="grid h-9 w-9 place-items-center rounded-lg border border-[var(--border)] text-[var(--muted)] transition hover:text-[var(--accent)]" title="Refresh">
+          <button onClick={() => load(true)} className="grid h-9 w-9 place-items-center rounded-lg border border-[var(--border)] text-[var(--muted)] transition hover:text-[var(--accent)]" title="Refresh — fetch the trackers now">
             <RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
           </button>
         </div>
       </header>
 
-      {data && !data.scraperConnected && (
-        <div className="panel mb-4 p-4 text-[13px] text-[var(--muted)]">
-          Waiting on the scraper — your <span className="text-[var(--text)]">summer-2027-internship-detector</span> task writes new roles to{" "}
-          <code className="text-[var(--accent)]">seen_jobs.json</code> up to 3× a day. Roles appear here automatically as it runs.
+      {data && (
+        <div className="panel mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 p-3 text-[12px] text-[var(--muted)]">
+          <span className="inline-flex items-center gap-1.5 font-medium text-[var(--good)]">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--good)]" /> Live
+          </span>
+          Jarvis fetches the top community trackers every few minutes — new big-tech roles land here within minutes of posting.
+          <span className="text-[var(--faint)]">
+            {data.detectedCount > 0 && `${data.detectedCount} detected free · `}
+            scraper adds fit scores {data.scraperConnected ? "3× a day" : "when it next runs"}.
+          </span>
         </div>
       )}
 
@@ -207,24 +231,32 @@ export function InternshipTracker() {
 
             {/* actions */}
             <div className="flex shrink-0 items-center gap-2">
-              {j.worthTailoring && !j.tailoredResume && data?.aiConfigured && (
+              {/* recommendation marker — tailoring never runs automatically */}
+              {j.worthTailoring && !j.tailoredResume && (
+                <span className="rounded-md border border-[var(--accent2)]/40 px-2 py-1 text-[10px] font-medium text-[var(--accent2)]" title="Good fit — worth tailoring your résumé for this one. Nothing runs until you ask.">
+                  ★ worth tailoring
+                </span>
+              )}
+              {j.tailoredResume ? (
+                <button onClick={() => setViewTex(j)} className="rounded-md bg-[var(--good)]/15 px-2.5 py-1 text-[11px] font-medium text-[var(--good)] transition hover:bg-[var(--good)]/25" title="Preview the tailored résumé as a PDF">
+                  View PDF
+                </button>
+              ) : j.tailorRequested ? (
+                <span className="rounded-md border border-[var(--warn)]/40 px-2 py-1 text-[10px] font-medium text-[var(--warn)]" title="Requested — the scraper tailors it on its next run, then it appears here as a PDF">
+                  Tailoring requested…
+                </span>
+              ) : (
                 <button
                   onClick={() => runTailor(j)}
                   disabled={!!busy[j.id]}
-                  className="rounded-md bg-[var(--accent2)]/18 px-2.5 py-1 text-[11px] font-medium text-[var(--accent2)] transition hover:bg-[var(--accent2)]/28 disabled:opacity-40"
-                  title="Generate a tailored resume for this role"
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition disabled:opacity-50 ${
+                    j.worthTailoring
+                      ? "bg-[var(--accent2)]/18 text-[var(--accent2)] hover:bg-[var(--accent2)]/28"
+                      : "border border-[var(--border)] text-[var(--muted)] hover:text-[var(--accent2)] hover:border-[var(--border-strong)]"
+                  }`}
+                  title={data?.tailoringInstant ? "Tailor your résumé for this role now" : "Request a tailored résumé — the scraper generates it on its next run"}
                 >
-                  {busy[j.id] === "tailor" ? "Tailoring…" : "Tailor résumé"}
-                </button>
-              )}
-              {j.worthTailoring && !j.tailoredResume && !data?.aiConfigured && (
-                <span className="rounded-md border border-[var(--accent2)]/30 px-2 py-1 text-[10px] font-medium text-[var(--accent2)]" title="The scraper will generate a tailored résumé on its next run">
-                  ★ tailor queued
-                </span>
-              )}
-              {j.tailoredResume && (
-                <button onClick={() => setViewTex(j)} className="rounded-md bg-[var(--good)]/15 px-2.5 py-1 text-[11px] font-medium text-[var(--good)] transition hover:bg-[var(--good)]/25">
-                  View résumé
+                  {busy[j.id] === "tailor" ? (data?.tailoringInstant ? "Tailoring…" : "Requesting…") : data?.tailoringInstant ? "Tailor now" : "Tailor this"}
                 </button>
               )}
               {j.url && (
@@ -238,22 +270,52 @@ export function InternshipTracker() {
       </div>
 
       {viewTex && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={() => setViewTex(null)}>
-          <div className="panel flex max-h-[85vh] w-full max-w-3xl flex-col p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-center gap-3">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" onClick={() => setViewTex(null)}>
+          <div className="panel flex max-h-[92vh] w-full max-w-4xl flex-col p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
               <h3 className="text-sm font-semibold text-[var(--text)]">Tailored résumé — {viewTex.company}</h3>
+              <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--faint)]">{viewTex.role}</span>
+              <a
+                href={`/api/internships/pdf?id=${encodeURIComponent(viewTex.id)}&download=1`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--muted)] transition hover:text-[var(--accent)]"
+              >
+                Download PDF
+              </a>
               <button
                 onClick={() => navigator.clipboard.writeText(viewTex.tailoredResume || "")}
                 className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--muted)] transition hover:text-[var(--accent)]"
               >
                 Copy LaTeX
               </button>
-              <button onClick={() => setViewTex(null)} className="ml-auto text-[var(--muted)] hover:text-[var(--text)]">✕</button>
+              {data?.tailoringInstant && (
+                <button
+                  onClick={async () => {
+                    const jb = viewTex;
+                    setViewTex(null);
+                    await runTailor(jb);
+                  }}
+                  className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--muted)] transition hover:text-[var(--accent2)]"
+                  title="Regenerate the tailored résumé"
+                >
+                  Re-tailor
+                </button>
+              )}
+              <button onClick={() => setViewTex(null)} className="text-[var(--muted)] hover:text-[var(--text)]">✕</button>
             </div>
-            <pre className="scroll-thin flex-1 overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-3 text-[11px] leading-relaxed text-[var(--text)]/90">
-              {viewTex.tailoredResume}
-            </pre>
-            <div className="mt-2 text-[10px] text-[var(--faint)]">Paste into your LaTeX editor (Overleaf) and compile. Facts unchanged — only keywords/emphasis tailored.</div>
+            {data?.pdfAvailable ? (
+              <iframe
+                src={`/api/internships/pdf?id=${encodeURIComponent(viewTex.id)}`}
+                className="min-h-[68vh] flex-1 rounded-lg border border-[var(--border)] bg-white"
+                title={`Tailored résumé for ${viewTex.company}`}
+              />
+            ) : (
+              <pre className="scroll-thin flex-1 overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-3 text-[11px] leading-relaxed text-[var(--text)]/90">
+                {viewTex.tailoredResume}
+              </pre>
+            )}
+            <div className="mt-2 text-[10px] text-[var(--faint)]">Facts unchanged — only keywords &amp; emphasis tailored. Compiled locally with tectonic; the first render takes a couple seconds.</div>
           </div>
         </div>
       )}

@@ -12,7 +12,7 @@ const BriefcaseIcon = ({ size = 16 }: { size?: number }) => (
 );
 
 type Internship = { id: string; company: string; role: string; bigTech: boolean; applied: boolean; score: number | null; worthTailoring: boolean | null };
-type Resp = { internships: Internship[]; total: number; bigTechCount: number; appliedCount: number; scraperConnected: boolean };
+type Resp = { internships: Internship[]; total: number; bigTechCount: number; appliedCount: number; scraperConnected: boolean; detectedCount: number };
 
 function Stat({ label, value, accent }: { label: string; value: number | string; accent?: string }) {
   return (
@@ -24,7 +24,7 @@ function Stat({ label, value, accent }: { label: string; value: number | string;
 }
 
 export function InternshipsWidget() {
-  const { data } = usePoll<Resp>("/api/internships?all=0", 30000);
+  const { data } = usePoll<Resp>("/api/internships?all=0", 15000);
   const top = (data?.internships || []).slice(0, 5);
   const worth = (data?.internships || []).filter((i) => i.worthTailoring).length;
 
@@ -63,9 +63,7 @@ export function InternshipsWidget() {
               </div>
             ) : (
               <div className="text-[13px] text-[var(--muted)]">
-                {data.scraperConnected
-                  ? "No big-tech roles yet — the scraper adds them 3× a day."
-                  : "Connected to your scraper (summer-2027-internship-detector). Roles appear here as it runs."}
+                Watching the live trackers — new big-tech roles land here within minutes of posting.
               </div>
             )}
           </div>
