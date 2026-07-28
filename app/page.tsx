@@ -1,7 +1,5 @@
 import { ClockHeader } from "@/components/ClockHeader";
 import { SessionLimitWidget } from "@/components/widgets/SessionLimitWidget";
-import { CloudUsageWidget } from "@/components/widgets/CloudUsageWidget";
-import { ClaudeUsageWidget } from "@/components/widgets/ClaudeUsageWidget";
 import { TasksWidget } from "@/components/widgets/TasksWidget";
 import { MeetingsWidget } from "@/components/widgets/MeetingsWidget";
 import { EmailWidget } from "@/components/widgets/EmailWidget";
@@ -14,17 +12,15 @@ export default function Home() {
       <ClockHeader name="Pulkit" />
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 auto-rows-min">
         <SessionLimitWidget />
-        <CloudUsageWidget />
-        <InternshipsWidget />
-        <ClaudeUsageWidget />
         <TasksWidget />
+        <InternshipsWidget />
         <MeetingsWidget />
         <EmailWidget />
         <TelegramWidget />
       </div>
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--faint)]">
         <span>Jarvis · local-first personal command center</span>
-        <span>Local &amp; cloud usage are live from local logs · email / meetings / telegram go live once connected</span>
+        <span>Session limit is live from Claude&apos;s usage data · email / meetings / telegram go live once connected</span>
       </footer>
     </main>
   );
