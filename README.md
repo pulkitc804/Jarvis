@@ -1,8 +1,8 @@
 # Jarvis — personal command center
 
 A live, always-open dashboard for your Mac that pulls **everything you track into one place**:
-your Claude **session limit**, tasks, meetings, email, and Telegram. Local-first, fast to iterate
-on, and built to keep open all day.
+your Claude **session limit**, an **internship tracker**, tasks, meetings, and email. Local-first,
+fast to iterate on, and built to keep open all day.
 
 ![session limit](https://img.shields.io/badge/session_limit-live-3ce0ff)
 ![local-first](https://img.shields.io/badge/local--first-yes-46e08a)
@@ -11,12 +11,11 @@ on, and built to keep open all day.
 
 | Panel | Status | Source |
 | --- | --- | --- |
-| **Session limit** | ✅ Live | Your real 5-hour session window from local `~/.claude` logs — countdown ticks every second. Shows the true Anthropic % when an OAuth token is provided. |
-| **Cost & tokens** | ✅ Live | Token/cost detail from the same logs (cache-tier-accurate) |
+| **Session limit** | ✅ Live | Your real 5-hour session window from Claude's own usage data — countdown ticks every second, matches `/usage`. |
+| **Internships** | ✅ Live | Auto-updating big-tech Summer-2027 SWE/ML/DS feed (undergrad-only) with fit scores, on-demand résumé tailoring, and PDF preview |
 | **Tasks** | ✅ Live | Local file-backed store (`data/tasks.json`) |
 | **Meetings** | 🔌 Connect | Any calendar's secret iCal URL (Google / Outlook / Apple) |
 | **Email** | 🔌 Connect | Gmail (or any IMAP) via an app password |
-| **Telegram** | 🔌 Connect | Telegram Bot API |
 
 ### About the session limit
 
@@ -78,7 +77,6 @@ leave your machine). See [`.env.local.example`](.env.local.example) for the exac
 | **Official Claude %** | `CLAUDE_CODE_OAUTH_TOKEN` | A Claude OAuth token (`sk-ant-oat01-…`). On macOS you can instead set `CLAUDE_OAUTH_FROM_KEYCHAIN=1` to read it from the Claude Code keychain item at runtime. Tokens expire, so this is optional polish on top of the always-accurate local window. |
 | **Meetings** | `CALENDAR_ICS_URLS` | Google Calendar → Settings → your calendar → **Secret address in iCal format**. Comma-separate multiple calendars. Works with Outlook/Apple published URLs too. Recurring events are expanded correctly. |
 | **Email** | `GMAIL_IMAP_USER` + `GMAIL_IMAP_APP_PASSWORD` | A Google **App Password** (Account → Security → App passwords; needs 2-Step Verification). Non-Gmail: `IMAP_HOST` / `IMAP_PORT` / `IMAP_USER` / `IMAP_PASSWORD`. |
-| **Telegram** | `TELEGRAM_BOT_TOKEN` | Create a bot via **@BotFather**. A bot sees messages sent *to it* and in groups/channels it's in — not your personal DMs with others (Telegram doesn't expose those to bots). |
 
 Until a panel is configured it shows an honest "Not connected" state with the exact variable to set.
 
@@ -113,20 +111,22 @@ subscription 5-hour window so the limit stays accurate.
 ```
 app/
   page.tsx                 # dashboard grid (session hero on top)
+  internships/page.tsx     # full internship tracker page
   api/
-    claude-usage/route.ts  # session window + cost/tokens (live, local logs)
-    usage-limit/route.ts   # official Anthropic % via /api/oauth/usage (if token)
+    usage-limit/route.ts   # exact 5h/weekly % (desktop usage cache; OAuth fallback)
+    claude-usage/route.ts  # token totals from local logs (feeds the session hero)
+    internships/route.ts   # merged job feed + status; score / tailor / pdf subroutes
     tasks/route.ts         # file-backed task CRUD
     meetings/route.ts      # iCal calendars
     email/route.ts         # IMAP inbox
-    telegram/route.ts      # Telegram Bot API
 lib/
-  claudeUsage.ts           # log parser, 5h-window reconstruction, cost math
+  planUsage.ts             # exact 5h/weekly % from the Claude desktop usage cache
+  claudeUsage.ts           # log parser, 5h-window reconstruction
   officialUsage.ts         # OAuth usage endpoint reader (server-side token)
-  meetingsSource.ts        # node-ical fetch + recurrence expansion
-  emailSource.ts           # imapflow inbox reader
-  telegramSource.ts        # Bot API getUpdates
-  pricing.ts · tasksStore.ts · usePoll.ts · format.ts
+  internships.ts           # merge scraper + live feeds, big-tech + undergrad filters
+  internshipFetcher.ts     # free HTTP tracker fetch (no tokens) → data/detected.json
+  localTools.ts            # tectonic LaTeX → PDF compile (tailored résumé preview)
+  meetingsSource.ts · emailSource.ts · tasksStore.ts · usePoll.ts · format.ts
 components/
   ClockHeader.tsx · Panel.tsx · Gauge.tsx · widgets/*
 ```

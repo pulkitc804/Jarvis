@@ -3,7 +3,6 @@ import { SessionLimitWidget } from "@/components/widgets/SessionLimitWidget";
 import { TasksWidget } from "@/components/widgets/TasksWidget";
 import { MeetingsWidget } from "@/components/widgets/MeetingsWidget";
 import { EmailWidget } from "@/components/widgets/EmailWidget";
-import { TelegramWidget } from "@/components/widgets/TelegramWidget";
 import { InternshipsWidget } from "@/components/widgets/InternshipsWidget";
 
 export default function Home() {
@@ -16,11 +15,10 @@ export default function Home() {
         <InternshipsWidget />
         <MeetingsWidget />
         <EmailWidget />
-        <TelegramWidget />
       </div>
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--faint)]">
         <span>Jarvis · local-first personal command center</span>
-        <span>Session limit is live from Claude&apos;s usage data · email / meetings / telegram go live once connected</span>
+        <span>Session limit is live from Claude&apos;s usage data · email / meetings go live once connected</span>
       </footer>
     </main>
   );
