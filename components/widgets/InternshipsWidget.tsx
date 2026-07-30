@@ -12,7 +12,22 @@ const BriefcaseIcon = ({ size = 16 }: { size?: number }) => (
 );
 
 type Internship = { id: string; company: string; role: string; bigTech: boolean; applied: boolean; score: number | null; worthTailoring: boolean | null };
-type Resp = { internships: Internship[]; total: number; bigTechCount: number; appliedCount: number; scraperConnected: boolean; detectedCount: number };
+type Deadline = { id: string; company: string; role: string; deadlineAt: number; deadlineLabel: string | null };
+type Resp = {
+  internships: Internship[];
+  total: number;
+  bigTechCount: number;
+  appliedCount: number;
+  upcomingDeadlines: Deadline[];
+  scraperConnected: boolean;
+  detectedCount: number;
+};
+
+function fmtDeadline(ms: number) {
+  const hrs = Math.round((ms - Date.now()) / 3_600_000);
+  if (hrs < 24) return `in ${Math.max(hrs, 1)}h`;
+  return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
 
 function Stat({ label, value, accent }: { label: string; value: number | string; accent?: string }) {
   return (
@@ -49,6 +64,20 @@ export function InternshipsWidget() {
             <Stat label="Worth tailoring" value={worth} accent="var(--accent2)" />
             <Stat label="All roles" value={data.total} />
           </div>
+          {data.upcomingDeadlines.length > 0 && (
+            <div className="flex shrink-0 flex-wrap gap-1.5 lg:max-w-[260px]">
+              {data.upcomingDeadlines.slice(0, 3).map((d) => (
+                <Link
+                  key={d.id}
+                  href="/internships"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)]/40 px-2 py-1 text-[11px] text-[var(--warn)] transition hover:bg-[var(--warn)]/10"
+                  title={`${d.company} — ${d.role}`}
+                >
+                  ⏰ {d.company} {fmtDeadline(d.deadlineAt)}
+                </Link>
+              ))}
+            </div>
+          )}
           <div className="min-w-0 flex-1">
             {top.length > 0 ? (
               <div className="space-y-1">

@@ -1,4 +1,4 @@
-import { listInternships, updateJob } from "@/lib/internships";
+import { listInternships, updateJob, upcomingDeadlines, type Stage } from "@/lib/internships";
 import { aiConfigured } from "@/lib/aiClient";
 import { ensureFetcherRunning, refreshDetected } from "@/lib/internshipFetcher";
 import { tectonicAvailable } from "@/lib/localTools";
@@ -22,6 +22,8 @@ export async function GET(request: Request) {
     total: internships.length,
     bigTechCount,
     appliedCount: internships.filter((i) => i.applied).length,
+    stageCounts: internships.reduce<Record<string, number>>((acc, i) => ((acc[i.stage] = (acc[i.stage] || 0) + 1), acc), {}),
+    upcomingDeadlines: upcomingDeadlines(),
     scraperConnected,
     scraperFile,
     detectedCount,
@@ -36,8 +38,21 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const b = (await request.json().catch(() => ({}))) as { id?: string; applied?: boolean; notes?: string };
+  const b = (await request.json().catch(() => ({}))) as {
+    id?: string;
+    applied?: boolean;
+    stage?: Stage;
+    deadlineAt?: number | null;
+    deadlineLabel?: string | null;
+    notes?: string;
+  };
   if (!b.id) return Response.json({ error: "id required" }, { status: 400 });
-  updateJob(b.id, { applied: b.applied, notes: b.notes });
+  updateJob(b.id, {
+    applied: b.applied,
+    stage: b.stage,
+    deadlineAt: b.deadlineAt,
+    deadlineLabel: b.deadlineLabel,
+    notes: b.notes,
+  });
   return Response.json({ ok: true });
 }

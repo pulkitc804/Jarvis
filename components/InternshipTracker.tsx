@@ -4,6 +4,27 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { RefreshIcon } from "@/components/icons";
 
+// Mirrors lib/internships.ts Stage/STAGE_LABEL — kept local since that module
+// pulls in node:fs and can't be imported into a client component.
+const STAGES = ["not_applied", "applied", "oa", "interview", "offer", "rejected"] as const;
+type Stage = (typeof STAGES)[number];
+const STAGE_LABEL: Record<Stage, string> = {
+  not_applied: "Not applied",
+  applied: "Applied",
+  oa: "OA",
+  interview: "Interview",
+  offer: "Offer",
+  rejected: "Rejected",
+};
+const STAGE_COLOR: Record<Stage, string> = {
+  not_applied: "var(--faint)",
+  applied: "var(--muted)",
+  oa: "var(--warn)",
+  interview: "var(--accent)",
+  offer: "var(--good)",
+  rejected: "var(--danger)",
+};
+
 type Internship = {
   id: string;
   company: string;
@@ -13,6 +34,9 @@ type Internship = {
   bigTech: boolean;
   applied: boolean;
   appliedAt: number | null;
+  stage: Stage;
+  deadlineAt: number | null;
+  deadlineLabel: string | null;
   firstSeen: number;
   score: number | null;
   worthTailoring: boolean | null;
@@ -27,6 +51,8 @@ type Resp = {
   total: number;
   bigTechCount: number;
   appliedCount: number;
+  stageCounts: Record<string, number>;
+  upcomingDeadlines: Array<{ id: string; company: string; role: string; deadlineAt: number; deadlineLabel: string | null }>;
   scraperConnected: boolean;
   detectedCount: number;
   aiConfigured: boolean;
@@ -42,6 +68,12 @@ function scoreColor(s: number): string {
 function fmtDate(ms: number) {
   return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+function fmtDeadline(ms: number) {
+  return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+function hoursUntil(ms: number) {
+  return Math.round((ms - Date.now()) / 3_600_000);
+}
 
 export function InternshipTracker() {
   const [data, setData] = useState<Resp | null>(null);
@@ -49,6 +81,9 @@ export function InternshipTracker() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<Record<string, "score" | "tailor">>({});
   const [viewTex, setViewTex] = useState<Internship | null>(null);
+  const [deadlineEditor, setDeadlineEditor] = useState<Internship | null>(null);
+  const [stageFilter, setStageFilter] = useState<Stage | "all">("all");
+  const [sortBy, setSortBy] = useState<"recent" | "score">("recent");
 
   const load = useCallback(
     async (force = false) => {
@@ -71,13 +106,24 @@ export function InternshipTracker() {
     return () => clearInterval(t);
   }, [load]);
 
-  async function toggleApplied(job: Internship) {
-    setData((d) => (d ? { ...d, internships: d.internships.map((j) => (j.id === job.id ? { ...j, applied: !j.applied } : j)) } : d));
+  async function setStage(job: Internship, stage: Stage) {
+    setData((d) => (d ? { ...d, internships: d.internships.map((j) => (j.id === job.id ? { ...j, stage, applied: stage !== "not_applied" } : j)) } : d));
     await fetch("/api/internships", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: job.id, applied: !job.applied }),
+      body: JSON.stringify({ id: job.id, stage }),
     });
+  }
+
+  async function saveDeadline(job: Internship, deadlineAt: number | null, deadlineLabel: string | null) {
+    setData((d) => (d ? { ...d, internships: d.internships.map((j) => (j.id === job.id ? { ...j, deadlineAt, deadlineLabel } : j)) } : d));
+    await fetch("/api/internships", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: job.id, deadlineAt, deadlineLabel }),
+    });
+    setDeadlineEditor(null);
+    load(false);
   }
 
   async function runScore(job: Internship) {
@@ -131,7 +177,11 @@ export function InternshipTracker() {
     }
   }
 
-  const jobs = data?.internships || [];
+  const allJobs = data?.internships || [];
+  const jobs = allJobs
+    .filter((j) => stageFilter === "all" || j.stage === stageFilter)
+    .slice()
+    .sort((a, b) => (sortBy === "score" ? (b.score ?? -1) - (a.score ?? -1) : 0));
 
   return (
     <main className="relative z-10 mx-auto w-full max-w-[1400px] px-4 sm:px-6 lg:px-8 py-6">
@@ -140,12 +190,14 @@ export function InternshipTracker() {
           ← Dashboard
         </Link>
         <h1 className="text-xl font-semibold text-[var(--text)]">Internship Tracker</h1>
-        {data && (
-          <span className="text-[12px] text-[var(--muted)]">
-            <span className="text-[var(--accent)]">{data.bigTechCount}</span> big-tech · {data.appliedCount} applied · {data.total} total
-          </span>
-        )}
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setSortBy((s) => (s === "recent" ? "score" : "recent"))}
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-[12px] font-medium text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--accent)]"
+            title="Toggle sort order"
+          >
+            {sortBy === "recent" ? "Newest first" : "Best fit first"}
+          </button>
           <button
             onClick={() => setBigTechOnly((v) => !v)}
             className={`rounded-lg border px-3 py-2 text-[12px] font-medium transition ${bigTechOnly ? "border-[var(--accent)]/50 text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)]"}`}
@@ -158,6 +210,51 @@ export function InternshipTracker() {
         </div>
       </header>
 
+      {/* metrics */}
+      {data && (
+        <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+          <MetricCard label="Big tech" value={data.bigTechCount} accent="var(--accent)" />
+          <MetricCard label="Applied" value={data.appliedCount} accent="var(--good)" />
+          <MetricCard label="OA" value={data.stageCounts.oa || 0} accent="var(--warn)" />
+          <MetricCard label="Interview" value={data.stageCounts.interview || 0} accent="var(--accent)" />
+          <MetricCard label="Offers" value={data.stageCounts.offer || 0} accent="var(--good)" />
+          <MetricCard
+            label="Worth tailoring"
+            value={allJobs.filter((j) => j.worthTailoring && !j.tailoredResume).length}
+            accent="var(--accent2)"
+          />
+        </div>
+      )}
+
+      {/* stage filter */}
+      {data && (
+        <div className="mb-4 flex flex-wrap gap-1.5">
+          <button
+            onClick={() => setStageFilter("all")}
+            className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition ${stageFilter === "all" ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--border-strong)]"}`}
+          >
+            All ({data.total})
+          </button>
+          {STAGES.map((s) => {
+            const n = data.stageCounts[s] || 0;
+            if (n === 0 && s !== "not_applied") return null;
+            return (
+              <button
+                key={s}
+                onClick={() => setStageFilter(s)}
+                className="rounded-md border px-2.5 py-1 text-[11px] font-medium transition"
+                style={{
+                  borderColor: stageFilter === s ? STAGE_COLOR[s] : "var(--border)",
+                  color: stageFilter === s ? STAGE_COLOR[s] : "var(--muted)",
+                }}
+              >
+                {STAGE_LABEL[s]} ({n})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {data && (
         <div className="panel mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 p-3 text-[12px] text-[var(--muted)]">
           <span className="inline-flex items-center gap-1.5 font-medium text-[var(--good)]">
@@ -168,6 +265,29 @@ export function InternshipTracker() {
             {data.detectedCount > 0 && `${data.detectedCount} detected free · `}
             scraper adds fit scores {data.scraperConnected ? "3× a day" : "when it next runs"}.
           </span>
+        </div>
+      )}
+
+      {data && data.upcomingDeadlines.length > 0 && (
+        <div className="panel mb-4 p-3">
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--faint)]">Upcoming deadlines</div>
+          <div className="flex flex-wrap gap-2">
+            {data.upcomingDeadlines.map((d) => {
+              const soon = hoursUntil(d.deadlineAt) <= 48;
+              return (
+                <span
+                  key={d.id}
+                  className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]"
+                  style={{ borderColor: soon ? "var(--danger)" : "var(--border-strong)", color: soon ? "var(--danger)" : "var(--text)" }}
+                  title={`${d.company} — ${d.role}`}
+                >
+                  <span className="font-medium">{d.company}</span>
+                  {d.deadlineLabel && <span className="text-[var(--faint)]">{d.deadlineLabel}</span>}
+                  <span className="tnum">{fmtDeadline(d.deadlineAt)}</span>
+                </span>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -183,16 +303,19 @@ export function InternshipTracker() {
       <div className="space-y-2">
         {jobs.map((j) => (
           <div key={j.id} className="panel flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-            <button
-              onClick={() => toggleApplied(j)}
-              className="grid h-5 w-5 shrink-0 place-items-center rounded-md border transition"
-              style={{ borderColor: j.applied ? "var(--good)" : "var(--border-strong)", background: j.applied ? "var(--good)" : "transparent" }}
-              title={j.applied ? "Applied" : "Mark applied"}
+            <select
+              value={j.stage}
+              onChange={(e) => setStage(j, e.target.value as Stage)}
+              className="w-28 shrink-0 rounded-md border bg-transparent px-2 py-1 text-[11px] font-medium"
+              style={{ borderColor: STAGE_COLOR[j.stage], color: STAGE_COLOR[j.stage] }}
+              title="Application stage"
             >
-              {j.applied && (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#05080f" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-              )}
-            </button>
+              {STAGES.map((s) => (
+                <option key={s} value={s} className="bg-[#0b0f16] text-[var(--text)]">
+                  {STAGE_LABEL[s]}
+                </option>
+              ))}
+            </select>
 
             <div className="min-w-[180px] flex-1">
               <div className="flex items-center gap-2">
@@ -231,6 +354,14 @@ export function InternshipTracker() {
 
             {/* actions */}
             <div className="flex shrink-0 items-center gap-2">
+              <button
+                onClick={() => setDeadlineEditor(j)}
+                className="rounded-md border px-2 py-1 text-[11px] transition"
+                style={{ borderColor: j.deadlineAt ? "var(--warn)" : "var(--border)", color: j.deadlineAt ? "var(--warn)" : "var(--muted)" }}
+                title={j.deadlineAt ? "Edit deadline" : "Set an OA/interview deadline"}
+              >
+                {j.deadlineAt ? `⏰ ${fmtDeadline(j.deadlineAt)}` : "+ Deadline"}
+              </button>
               {/* recommendation marker — tailoring never runs automatically */}
               {j.worthTailoring && !j.tailoredResume && (
                 <span className="rounded-md border border-[var(--accent2)]/40 px-2 py-1 text-[10px] font-medium text-[var(--accent2)]" title="Good fit — worth tailoring your résumé for this one. Nothing runs until you ask.">
@@ -268,6 +399,15 @@ export function InternshipTracker() {
           </div>
         ))}
       </div>
+
+      {deadlineEditor && (
+        <DeadlineEditor
+          job={deadlineEditor}
+          onCancel={() => setDeadlineEditor(null)}
+          onClear={() => saveDeadline(deadlineEditor, null, null)}
+          onSave={(at, label) => saveDeadline(deadlineEditor, at, label)}
+        />
+      )}
 
       {viewTex && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" onClick={() => setViewTex(null)}>
@@ -320,5 +460,86 @@ export function InternshipTracker() {
         </div>
       )}
     </main>
+  );
+}
+
+function MetricCard({ label, value, accent }: { label: string; value: number; accent: string }) {
+  return (
+    <div className="panel px-3.5 py-2.5">
+      <div className="tnum text-2xl font-semibold" style={{ color: accent }}>{value}</div>
+      <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">{label}</div>
+    </div>
+  );
+}
+
+function DeadlineEditor({
+  job,
+  onCancel,
+  onClear,
+  onSave,
+}: {
+  job: Internship;
+  onCancel: () => void;
+  onClear: () => void;
+  onSave: (deadlineAt: number, deadlineLabel: string) => void;
+}) {
+  const initial = job.deadlineAt ? new Date(job.deadlineAt) : null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const [dateStr, setDateStr] = useState(initial ? `${initial.getFullYear()}-${pad(initial.getMonth() + 1)}-${pad(initial.getDate())}` : "");
+  const [timeStr, setTimeStr] = useState(initial ? `${pad(initial.getHours())}:${pad(initial.getMinutes())}` : "23:59");
+  const [label, setLabel] = useState(job.deadlineLabel || "OA due");
+
+  function save() {
+    if (!dateStr) return;
+    const at = new Date(`${dateStr}T${timeStr || "23:59"}`).getTime();
+    if (Number.isNaN(at)) return;
+    onSave(at, label.trim().slice(0, 60));
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" onClick={onCancel}>
+      <div className="panel w-full max-w-sm p-4" onClick={(e) => e.stopPropagation()}>
+        <h3 className="mb-3 text-sm font-semibold text-[var(--text)]">
+          Deadline — {job.company}
+        </h3>
+        <div className="space-y-2.5">
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. OA due, Final round"
+            className="w-full rounded-md border border-[var(--border)] bg-transparent px-2.5 py-1.5 text-[13px] text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          />
+          <div className="flex gap-2">
+            <input
+              type="date"
+              value={dateStr}
+              onChange={(e) => setDateStr(e.target.value)}
+              className="flex-1 rounded-md border border-[var(--border)] bg-transparent px-2.5 py-1.5 text-[13px] text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            />
+            <input
+              type="time"
+              value={timeStr}
+              onChange={(e) => setTimeStr(e.target.value)}
+              className="w-28 rounded-md border border-[var(--border)] bg-transparent px-2.5 py-1.5 text-[13px] text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            />
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-2">
+          {job.deadlineAt && (
+            <button onClick={onClear} className="rounded-md border border-[var(--danger)]/40 px-2.5 py-1.5 text-[12px] text-[var(--danger)] transition hover:bg-[var(--danger)]/10">
+              Clear
+            </button>
+          )}
+          <div className="ml-auto flex gap-2">
+            <button onClick={onCancel} className="rounded-md border border-[var(--border)] px-2.5 py-1.5 text-[12px] text-[var(--muted)]">
+              Cancel
+            </button>
+            <button onClick={save} disabled={!dateStr} className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-[12px] font-medium text-[#05080f] transition disabled:opacity-40">
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -76,9 +76,26 @@ type ScraperJob = {
   tailoredResume?: string;
 };
 
+// Application pipeline stage. "applied" replaces the old boolean — richer than
+// a checkbox so you can see where each role actually stands.
+export const STAGES = ["not_applied", "applied", "oa", "interview", "offer", "rejected"] as const;
+export type Stage = (typeof STAGES)[number];
+export const STAGE_LABEL: Record<Stage, string> = {
+  not_applied: "Not applied",
+  applied: "Applied",
+  oa: "OA",
+  interview: "Interview",
+  offer: "Offer",
+  rejected: "Rejected",
+};
+
 export type JobStatus = {
-  applied: boolean;
+  applied: boolean; // derived from stage !== "not_applied" — kept for back-compat
   appliedAt: number | null;
+  stage: Stage;
+  stageUpdatedAt: number | null;
+  deadlineAt: number | null; // next OA/interview deadline the user is tracking
+  deadlineLabel: string | null; // e.g. "OA due", "Final round"
   firstSeen: number;
   score: number | null; // 0-100 resume↔role similarity
   worthTailoring: boolean | null;
@@ -164,6 +181,10 @@ export function listInternships(): { internships: Internship[]; scraperConnected
       bigTech: isBigTech(j.company),
       applied: st.applied ?? false,
       appliedAt: st.appliedAt ?? null,
+      stage: st.stage ?? (st.applied ? "applied" : "not_applied"),
+      stageUpdatedAt: st.stageUpdatedAt ?? null,
+      deadlineAt: st.deadlineAt ?? null,
+      deadlineLabel: st.deadlineLabel ?? null,
       firstSeen: st.firstSeen ?? now,
       // Prefer scores the scraper wrote into seen_jobs.json; fall back to any
       // written by Jarvis's own /api/internships/score (if an API key is added).
@@ -193,12 +214,30 @@ export function updateJob(id: string, patch: Partial<JobStatus>): void {
   if (patch.applied !== undefined) {
     cur.applied = patch.applied;
     cur.appliedAt = patch.applied ? Date.now() : null;
+    // legacy boolean toggle also moves the stage forward/back
+    if (patch.stage === undefined) cur.stage = patch.applied ? "applied" : "not_applied";
   }
-  for (const k of ["score", "worthTailoring", "scoreReason", "tailoredResume", "tailorRequested", "tailorRequestedAt", "notes", "firstSeen"] as const) {
+  if (patch.stage !== undefined) {
+    cur.stage = patch.stage;
+    cur.stageUpdatedAt = Date.now();
+    cur.applied = patch.stage !== "not_applied";
+    cur.appliedAt = cur.applied ? cur.appliedAt ?? Date.now() : null;
+  }
+  for (const k of ["score", "worthTailoring", "scoreReason", "tailoredResume", "tailorRequested", "tailorRequestedAt", "deadlineAt", "deadlineLabel", "notes", "firstSeen"] as const) {
     if (patch[k] !== undefined) (cur as Record<string, unknown>)[k] = patch[k];
   }
   map[id] = cur;
   writeStatusMap(map);
+}
+
+/** Upcoming OA/interview deadlines across all tracked jobs, soonest first. */
+export function upcomingDeadlines(withinMs = 14 * 24 * 60 * 60 * 1000): Array<{ id: string; company: string; role: string; deadlineAt: number; deadlineLabel: string | null }> {
+  const { internships } = listInternships();
+  const now = Date.now();
+  return internships
+    .filter((j) => j.deadlineAt != null && j.deadlineAt >= now && j.deadlineAt <= now + withinMs)
+    .sort((a, b) => (a.deadlineAt as number) - (b.deadlineAt as number))
+    .map((j) => ({ id: j.id, company: j.company, role: j.role, deadlineAt: j.deadlineAt as number, deadlineLabel: j.deadlineLabel }));
 }
 
 export function getJobById(id: string): Internship | null {
