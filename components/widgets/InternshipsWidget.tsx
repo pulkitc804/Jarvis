@@ -11,7 +11,18 @@ const BriefcaseIcon = ({ size = 16 }: { size?: number }) => (
   </svg>
 );
 
-type Internship = { id: string; company: string; role: string; bigTech: boolean; applied: boolean; score: number | null; worthTailoring: boolean | null };
+type Stage = "not_applied" | "applied" | "oa" | "interview" | "offer" | "rejected";
+type Internship = { id: string; company: string; role: string; bigTech: boolean; applied: boolean; stage: Stage; score: number | null; worthTailoring: boolean | null };
+
+// Mirrors the tracker's stage palette so a dot means the same thing everywhere.
+const STAGE_COLOR: Record<Stage, string> = {
+  not_applied: "var(--faint)",
+  applied: "var(--accent-2)",
+  oa: "var(--warn)",
+  interview: "var(--accent)",
+  offer: "var(--good)",
+  rejected: "var(--danger)",
+};
 type Deadline = { id: string; company: string; role: string; deadlineAt: number; deadlineLabel: string | null };
 type Resp = {
   internships: Internship[];
@@ -60,7 +71,7 @@ export function InternshipsWidget() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
           <div className="grid grid-cols-4 gap-2.5 lg:w-[420px] lg:shrink-0">
             <Stat label="Big tech" value={data.bigTechCount} accent="var(--accent)" />
-            <Stat label="Applied" value={data.appliedCount} accent="var(--good)" />
+            <Stat label="Applied" value={data.appliedCount} accent={STAGE_COLOR.applied} />
             <Stat label="Worth tailoring" value={worth} accent="var(--accent2)" />
             <Stat label="All roles" value={data.total} />
           </div>
@@ -83,7 +94,11 @@ export function InternshipsWidget() {
               <div className="space-y-1">
                 {top.map((j) => (
                   <Link key={j.id} href="/internships" className="flex items-center gap-3 rounded-lg px-2 py-1.5 transition hover:bg-white/[0.025]">
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${j.applied ? "bg-[var(--good)]" : "bg-[var(--warn)]"}`} />
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: STAGE_COLOR[j.stage] || "var(--faint)" }}
+                      title={j.stage.replace("_", " ")}
+                    />
                     <span className="w-32 shrink-0 truncate text-[13px] font-medium text-[var(--text)]">{j.company}</span>
                     <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--muted)]">{j.role}</span>
                     {j.score != null && <span className="tnum shrink-0 text-[12px] text-[var(--accent)]">{j.score}</span>}

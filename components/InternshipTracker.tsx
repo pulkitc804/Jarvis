@@ -16,14 +16,21 @@ const STAGE_LABEL: Record<Stage, string> = {
   offer: "Offer",
   rejected: "Rejected",
 };
+// Each stage owns a distinct colour so a row's state reads at a glance:
+// gray (untouched) → periwinkle (applied) → amber (OA) → cyan (interview) →
+// green (offer) / red (rejected).
 const STAGE_COLOR: Record<Stage, string> = {
   not_applied: "var(--faint)",
-  applied: "var(--muted)",
+  applied: "var(--accent-2)",
   oa: "var(--warn)",
   interview: "var(--accent)",
   offer: "var(--good)",
   rejected: "var(--danger)",
 };
+/** Translucent fill of the same hue, so the control reads as a coloured chip. */
+function stageTint(stage: Stage, pct = 14): string {
+  return `color-mix(in srgb, ${STAGE_COLOR[stage]} ${pct}%, transparent)`;
+}
 
 type Internship = {
   id: string;
@@ -213,11 +220,11 @@ export function InternshipTracker() {
       {/* metrics */}
       {data && (
         <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
-          <MetricCard label="Big tech" value={data.bigTechCount} accent="var(--accent)" />
-          <MetricCard label="Applied" value={data.appliedCount} accent="var(--good)" />
-          <MetricCard label="OA" value={data.stageCounts.oa || 0} accent="var(--warn)" />
-          <MetricCard label="Interview" value={data.stageCounts.interview || 0} accent="var(--accent)" />
-          <MetricCard label="Offers" value={data.stageCounts.offer || 0} accent="var(--good)" />
+          <MetricCard label="Big tech" value={data.bigTechCount} accent="var(--text)" />
+          <MetricCard label="Applied" value={data.appliedCount} accent={STAGE_COLOR.applied} />
+          <MetricCard label="OA" value={data.stageCounts.oa || 0} accent={STAGE_COLOR.oa} />
+          <MetricCard label="Interview" value={data.stageCounts.interview || 0} accent={STAGE_COLOR.interview} />
+          <MetricCard label="Offers" value={data.stageCounts.offer || 0} accent={STAGE_COLOR.offer} />
           <MetricCard
             label="Worth tailoring"
             value={allJobs.filter((j) => j.worthTailoring && !j.tailoredResume).length}
@@ -242,12 +249,14 @@ export function InternshipTracker() {
               <button
                 key={s}
                 onClick={() => setStageFilter(s)}
-                className="rounded-md border px-2.5 py-1 text-[11px] font-medium transition"
+                className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition"
                 style={{
                   borderColor: stageFilter === s ? STAGE_COLOR[s] : "var(--border)",
+                  background: stageFilter === s ? stageTint(s) : "transparent",
                   color: stageFilter === s ? STAGE_COLOR[s] : "var(--muted)",
                 }}
               >
+                <span className="h-1.5 w-1.5 rounded-full" style={{ background: STAGE_COLOR[s] }} />
                 {STAGE_LABEL[s]} ({n})
               </button>
             );
@@ -306,8 +315,12 @@ export function InternshipTracker() {
             <select
               value={j.stage}
               onChange={(e) => setStage(j, e.target.value as Stage)}
-              className="w-28 shrink-0 rounded-md border bg-transparent px-2 py-1 text-[11px] font-medium"
-              style={{ borderColor: STAGE_COLOR[j.stage], color: STAGE_COLOR[j.stage] }}
+              className="w-28 shrink-0 cursor-pointer rounded-md border px-2 py-1 text-[11px] font-semibold outline-none transition"
+              style={{
+                borderColor: `color-mix(in srgb, ${STAGE_COLOR[j.stage]} 55%, transparent)`,
+                background: stageTint(j.stage),
+                color: STAGE_COLOR[j.stage],
+              }}
               title="Application stage"
             >
               {STAGES.map((s) => (

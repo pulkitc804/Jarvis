@@ -15,6 +15,9 @@
 
   --accent: #3ce0ff;
   --accent-2: #7c93ff;
+  /* Alias: components reference var(--accent2) in inline styles and arbitrary
+     values, where the Tailwind --color-accent2 token doesn't apply. */
+  --accent2: var(--accent-2);
   --good: #46e08a;
   --warn: #ffcf5c;
   --danger: #ff6b7d;
