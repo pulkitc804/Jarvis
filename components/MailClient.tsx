@@ -190,7 +190,7 @@ export function MailClient() {
 
               <div className="border-t border-[var(--border)] pt-3">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <label className="text-[11px] uppercase tracking-wide text-[var(--faint)]">To</label>
+                  <label className="text-[11px] text-[var(--faint)]">To</label>
                   <input
                     value={to}
                     onChange={(e) => setTo(e.target.value)}
@@ -198,7 +198,7 @@ export function MailClient() {
                   />
                 </div>
                 <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <label className="text-[11px] uppercase tracking-wide text-[var(--faint)]">Subj</label>
+                  <label className="text-[11px] text-[var(--faint)]">Subj</label>
                   <input
                     value={subject}
                     onChange={(e) => setSubject(e.target.value)}

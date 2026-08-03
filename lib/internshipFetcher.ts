@@ -1,83 +1,58 @@
 import fs from "node:fs";
 import path from "node:path";
-import { isBigTech, isUndergradRole } from "./internships";
+import { isUndergradRole } from "./internships";
+import { fetchEverything, type DetectedJob, type SourceReport } from "./jobSources";
 
 /**
- * FREE, fast job detection: Jarvis's own server fetches community internship
- * trackers (plain HTTP — no Claude tokens, no drain on the subscription),
- * parses NEW big-tech SWE/ML/DS roles, and writes them to data/detected.json.
- * The Claude scraper task then enriches these with fit scores on its schedule.
+ * FREE, fast job detection. Jarvis's own server polls every source in
+ * lib/jobSources.ts over plain HTTP — no Claude tokens, no drain on the
+ * subscription — and writes new roles to data/detected.json. The Claude scraper
+ * task then enriches them with fit scores on its own schedule.
  */
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DETECTED_FILE = path.join(DATA_DIR, "detected.json");
+const STATE_FILE = path.join(DATA_DIR, "fetcher-state.json");
 
-// Summer-2027 community trackers (pittcsc/SimplifyJobs table format). Add more freely.
-const TRACKERS = [
-  "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/README.md",
-  "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/main/README.md",
-  "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/README.md",
-];
+export type { DetectedJob };
 
-const ROLE_RE = /software engineer|software dev|\bswe\b|machine learning|\bml\b|\bai\b|data scien|data eng|applied scien|research (engineer|intern)|full.?stack|backend|frontend|infrastructure|platform/i;
-
-export type DetectedJob = { company: string; role: string; url: string; location?: string; firstSeen?: string };
-
-function cleanUrl(u: string): string {
-  return u.replace(/[?&]utm_source=[^&]*/g, "").replace(/[?&]$/, "").trim();
-}
-function stripTags(s: string): string {
-  return s
-    .replace(/<br\s*\/?>|<\/br>/gi, ", ")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/<[^>]+>/g, "")
-    .replace(/\*\*/g, "")
-    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F1E6}-\u{1F1FF}]/gu, "")
-    .replace(/\s+/g, " ")
-    .trim();
+/** Rank sources by how close they are to the employer, best first. */
+const SOURCE_RANK: Record<string, number> = { greenhouse: 0, lever: 0, ashby: 0, tracker: 1, reddit: 2, hackernews: 3 };
+function better(a: DetectedJob, b: DetectedJob): DetectedJob {
+  const ra = SOURCE_RANK[a.source || ""] ?? 9;
+  const rb = SOURCE_RANK[b.source || ""] ?? 9;
+  if (ra !== rb) return ra < rb ? a : b;
+  // same tier — keep whichever actually knows when it was posted
+  return a.postedAt ? a : b;
 }
 
-function parseTracker(md: string): DetectedJob[] {
-  const out: DetectedJob[] = [];
-  let lastCompany = "";
-  for (const line of md.split("\n")) {
-    if (!line.startsWith("|")) continue;
-    const cells = line.split("|").slice(1, -1).map((c) => c.trim());
-    if (cells.length < 4) continue;
-    const [c0, roleRaw, locRaw, applyRaw] = cells;
-    if (/^-+$/.test(c0) || /^company$/i.test(stripTags(c0))) continue; // header/separator
-    let company = stripTags(c0);
-    if (!company || c0.includes("↳") || company === "↳") company = lastCompany;
-    else lastCompany = company;
-    if (!company) continue;
-    const role = stripTags(roleRaw);
-    if (!ROLE_RE.test(role)) continue;
-    if (!isUndergradRole(role)) continue; // undergrad only — no PhD/Masters-only roles
-    const href = applyRaw.match(/href="([^"]+)"/) || applyRaw.match(/\((https?:\/\/[^)]+)\)/);
-    if (!href) continue; // closed roles have no apply link
-    if (!isBigTech(company)) continue; // only big-tech, per your preference
-    out.push({ company, role, location: stripTags(locRaw), url: cleanUrl(href[1]) });
-  }
-  return out;
+/** Same role seen on two sources → one entry. Company+role is stabler than URL. */
+function dedupeKey(j: DetectedJob): string {
+  return `${j.company.toLowerCase().trim()}::${j.role.toLowerCase().replace(/\s+/g, " ").trim()}`;
 }
 
-function readDetected(): DetectedJob[] {
+function readJson<T>(file: string, fallback: T): T {
   try {
-    const a = JSON.parse(fs.readFileSync(DETECTED_FILE, "utf8"));
-    return Array.isArray(a) ? a : [];
+    return JSON.parse(fs.readFileSync(file, "utf8")) as T;
   } catch {
-    return [];
+    return fallback;
   }
 }
-function writeDetected(jobs: DetectedJob[]) {
+
+function writeJsonAtomic(file: string, data: unknown) {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = path.join(DATA_DIR, `detected.${process.pid}.${Date.now()}.tmp`);
-  fs.writeFileSync(tmp, JSON.stringify(jobs, null, 2), "utf8");
-  fs.renameSync(tmp, DETECTED_FILE);
+  const tmp = path.join(DATA_DIR, `${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
+  fs.renameSync(tmp, file);
 }
 
 export function getDetectedJobs(): DetectedJob[] {
-  return readDetected();
+  return readJson<DetectedJob[]>(DETECTED_FILE, []);
+}
+
+export type FetcherState = { lastRunAt: string | null; lastAdded: number; report: SourceReport[] };
+export function getFetcherState(): FetcherState {
+  return readJson<FetcherState>(STATE_FILE, { lastRunAt: null, lastAdded: 0, report: [] });
 }
 
 let running = false;
@@ -87,32 +62,37 @@ export async function refreshDetected(): Promise<number> {
   if (running) return 0;
   running = true;
   try {
+    const { jobs, report } = await fetchEverything();
+
+    // Collapse duplicates across sources, keeping the closest-to-employer copy.
     const found = new Map<string, DetectedJob>();
-    for (const url of TRACKERS) {
-      try {
-        const c = new AbortController();
-        const t = setTimeout(() => c.abort(), 15000);
-        const res = await fetch(url, { signal: c.signal, headers: { "user-agent": "jarvis-dashboard" } }).finally(() => clearTimeout(t));
-        if (!res.ok) continue;
-        const md = await res.text();
-        for (const j of parseTracker(md)) if (!found.has(j.url)) found.set(j.url, j);
-      } catch {
-        /* ignore this tracker */
-      }
+    for (const j of jobs) {
+      const k = dedupeKey(j);
+      const prev = found.get(k);
+      found.set(k, prev ? better(prev, j) : j);
     }
-    // Drop any previously-stored entries that no longer pass the filters
-    // (e.g. grad-only roles saved before the undergrad rule existed).
-    const existing = readDetected().filter((j) => isUndergradRole(j.role));
-    const pruned = readDetected().length - existing.length;
-    const byUrl = new Map(existing.map((j) => [j.url, j]));
+
+    // Re-apply filters to anything stored before a rule existed.
+    const existing = getDetectedJobs().filter((j) => isUndergradRole(j.role));
+    const pruned = getDetectedJobs().length - existing.length;
+
+    const byKey = new Map(existing.map((j) => [dedupeKey(j), j]));
     let added = 0;
-    for (const j of found.values()) {
-      if (!byUrl.has(j.url)) {
-        byUrl.set(j.url, { ...j, firstSeen: nowIso() });
+    let enriched = 0;
+    for (const [k, j] of found) {
+      const prev = byKey.get(k);
+      if (!prev) {
+        byKey.set(k, { ...j, firstSeen: nowIso() });
         added++;
+      } else if (!prev.postedAt && j.postedAt) {
+        // A better source now knows the real publish time — backfill it.
+        byKey.set(k, { ...prev, postedAt: j.postedAt, source: j.source || prev.source });
+        enriched++;
       }
     }
-    if (added > 0 || pruned > 0) writeDetected([...byUrl.values()]);
+
+    if (added > 0 || pruned > 0 || enriched > 0) writeJsonAtomic(DETECTED_FILE, [...byKey.values()]);
+    writeJsonAtomic(STATE_FILE, { lastRunAt: nowIso(), lastAdded: added, report } satisfies FetcherState);
     return added;
   } finally {
     running = false;
@@ -120,14 +100,15 @@ export async function refreshDetected(): Promise<number> {
 }
 
 function nowIso(): string {
-  // Date is available at runtime in the node server (only the Workflow sandbox blocks it).
   return new Date().toISOString();
 }
 
-/** Start the background fetch loop once (server is long-running, so it persists).
- *  5 min matches raw.githubusercontent.com's CDN cache — fetching faster just
- *  returns the same cached bytes, so this is the real freshness ceiling. */
-export function ensureFetcherRunning(intervalMs = 5 * 60 * 1000) {
+/**
+ * Start the background poll loop once (the server is long-running, so it
+ * persists). 3 min is a good floor: ATS endpoints are CDN-cached for ~1-2 min
+ * and GitHub's raw CDN for ~5, so polling faster mostly re-reads cached bytes.
+ */
+export function ensureFetcherRunning(intervalMs = 3 * 60 * 1000) {
   if (started) return;
   started = true;
   void refreshDetected();

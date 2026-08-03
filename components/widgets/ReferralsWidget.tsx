@@ -115,7 +115,7 @@ export function ReferralsWidget() {
 
         {data && data.gaps.length > 0 && (
           <div className="mt-auto border-t border-[var(--border)] pt-2.5">
-            <div className="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">No contact yet at</div>
+            <div className="mb-1.5 label">No contact yet at</div>
             <div className="flex flex-wrap gap-1">
               {data.gaps.slice(0, 8).map((g) => (
                 <button

@@ -45,6 +45,9 @@ type Internship = {
   deadlineAt: number | null;
   deadlineLabel: string | null;
   firstSeen: number;
+  /** Employer publish time when the source reports one, else null. */
+  postedAt: number | null;
+  source?: string;
   score: number | null;
   worthTailoring: boolean | null;
   scoreReason: string | null;
@@ -62,6 +65,7 @@ type Resp = {
   upcomingDeadlines: Array<{ id: string; company: string; role: string; deadlineAt: number; deadlineLabel: string | null }>;
   scraperConnected: boolean;
   detectedCount: number;
+  fetcher?: { lastRunAt: string | null; lastAdded: number; report: Array<{ source: string; found: number; ok: boolean }> };
   aiConfigured: boolean;
   tailoringInstant: boolean; // true = API key set (instant); false = queued to scraper
   pdfAvailable: boolean;
@@ -75,6 +79,43 @@ function scoreColor(s: number): string {
 function fmtDate(ms: number) {
   return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+function fmtTime(ms: number) {
+  return new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+function fmtStamp(ms: number) {
+  return new Date(ms).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+function relAge(ms: number): string {
+  const mins = Math.round((Date.now() - ms) / 60000);
+  if (mins < 60) return `${Math.max(mins, 0)}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return days < 30 ? `${days}d ago` : `${Math.round(days / 30)}mo ago`;
+}
+// Where the row came from; ATS feeds are the employer's own board.
+const SOURCE_LABEL: Record<string, string> = {
+  greenhouse: "Greenhouse",
+  lever: "Lever",
+  ashby: "Ashby",
+  tracker: "GitHub tracker",
+  reddit: "Reddit",
+  hackernews: "Hacker News",
+  indeed: "Indeed",
+};
+// Feed groups reported by the background fetcher.
+const SOURCE_GROUP: Record<string, string> = {
+  ats: "Company boards",
+  trackers: "GitHub trackers",
+  reddit: "Reddit",
+  hackernews: "Hacker News",
+};
 function fmtDeadline(ms: number) {
   return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
@@ -188,7 +229,12 @@ export function InternshipTracker() {
   const jobs = allJobs
     .filter((j) => stageFilter === "all" || j.stage === stageFilter)
     .slice()
-    .sort((a, b) => (sortBy === "score" ? (b.score ?? -1) - (a.score ?? -1) : 0));
+    .sort((a, b) =>
+      sortBy === "score"
+        ? (b.score ?? -1) - (a.score ?? -1)
+        : // freshest first, by real publish time when known
+          (b.postedAt ?? b.firstSeen) - (a.postedAt ?? a.firstSeen),
+    );
 
   return (
     <main className="relative z-10 mx-auto w-full max-w-[1400px] px-4 sm:px-6 lg:px-8 py-6">
@@ -203,7 +249,7 @@ export function InternshipTracker() {
             className="rounded-lg border border-[var(--border)] px-3 py-2 text-[12px] font-medium text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--accent)]"
             title="Toggle sort order"
           >
-            {sortBy === "recent" ? "Newest first" : "Best fit first"}
+            {sortBy === "recent" ? "Newest posted" : "Best fit"}
           </button>
           <button
             onClick={() => setBigTechOnly((v) => !v)}
@@ -264,22 +310,30 @@ export function InternshipTracker() {
         </div>
       )}
 
-      {data && (
-        <div className="panel mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 p-3 text-[12px] text-[var(--muted)]">
-          <span className="inline-flex items-center gap-1.5 font-medium text-[var(--good)]">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--good)]" /> Live
+      {data?.fetcher && (
+        <div className="panel mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 px-3.5 py-2.5 text-[12px]">
+          <span className="inline-flex items-center gap-2 text-[var(--text)]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--good)]" />
+            Watching {data.fetcher.report.length || 4} feeds
           </span>
-          Jarvis fetches the top community trackers every few minutes — new big-tech roles land here within minutes of posting.
-          <span className="text-[var(--faint)]">
-            {data.detectedCount > 0 && `${data.detectedCount} detected free · `}
-            scraper adds fit scores {data.scraperConnected ? "3× a day" : "when it next runs"}.
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[var(--muted)]">
+            {data.fetcher.report.map((r) => (
+              <span key={r.source} title={`${r.found} matching roles on the last pass`}>
+                {SOURCE_GROUP[r.source] || r.source}
+                <span className="tnum ml-1 text-[var(--faint)]">{r.found}</span>
+              </span>
+            ))}
+          </span>
+          <span className="ml-auto text-[var(--faint)]">
+            {data.fetcher.lastRunAt ? `checked ${relAge(Date.parse(data.fetcher.lastRunAt))}` : "starting…"}
+            {data.fetcher.lastAdded > 0 && ` · +${data.fetcher.lastAdded} new`}
           </span>
         </div>
       )}
 
       {data && data.upcomingDeadlines.length > 0 && (
         <div className="panel mb-4 p-3">
-          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--faint)]">Upcoming deadlines</div>
+          <div className="mb-2 label">Upcoming deadlines</div>
           <div className="flex flex-wrap gap-2">
             {data.upcomingDeadlines.map((d) => {
               const soon = hoursUntil(d.deadlineAt) <= 48;
@@ -333,13 +387,39 @@ export function InternshipTracker() {
             <div className="min-w-[180px] flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-[var(--text)]">{j.company}</span>
-                {j.bigTech && <span className="rounded bg-[var(--accent)]/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--accent)]">big tech</span>}
+                {j.source && (
+                  <span
+                    className="rounded border border-[var(--border)] px-1.5 py-px text-[10px] text-[var(--faint)]"
+                    title={
+                      ["greenhouse", "lever", "ashby"].includes(j.source)
+                        ? "Straight from the company's own job board — the earliest possible signal"
+                        : "Found via a secondary feed"
+                    }
+                  >
+                    {SOURCE_LABEL[j.source] || j.source}
+                  </span>
+                )}
               </div>
               <div className="truncate text-[13px] text-[var(--muted)]">{j.role}</div>
             </div>
 
-            <div className="w-16 shrink-0 text-[11px] text-[var(--faint)]" title="First detected">
-              {fmtDate(j.firstSeen)}
+            {/* Ledger stamp: the employer's publish time when we have it,
+                otherwise when Jarvis first saw the role. */}
+            <div
+              className="w-[124px] shrink-0 leading-tight"
+              title={
+                (j.postedAt ? `Posted ${fmtStamp(j.postedAt)}` : `No publish time from this source`) +
+                `\nDetected by Jarvis ${fmtStamp(j.firstSeen)}` +
+                (j.source ? `\nSource: ${SOURCE_LABEL[j.source] || j.source}` : "")
+              }
+            >
+              <div className="tnum text-[12px] text-[var(--text)]">
+                {fmtDate(j.postedAt ?? j.firstSeen)}
+                <span className="ml-1.5 text-[var(--muted)]">{fmtTime(j.postedAt ?? j.firstSeen)}</span>
+              </div>
+              <div className="text-[10px] text-[var(--faint)]">
+                {j.postedAt ? `posted · ${relAge(j.postedAt)}` : `detected · ${relAge(j.firstSeen)}`}
+              </div>
             </div>
 
             {/* score */}
@@ -480,7 +560,7 @@ function MetricCard({ label, value, accent }: { label: string; value: number; ac
   return (
     <div className="panel px-3.5 py-2.5">
       <div className="tnum text-2xl font-semibold" style={{ color: accent }}>{value}</div>
-      <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">{label}</div>
+      <div className="label">{label}</div>
     </div>
   );
 }

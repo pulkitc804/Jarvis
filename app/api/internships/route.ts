@@ -1,6 +1,6 @@
 import { listInternships, updateJob, upcomingDeadlines, type Stage } from "@/lib/internships";
 import { aiConfigured } from "@/lib/aiClient";
-import { ensureFetcherRunning, refreshDetected } from "@/lib/internshipFetcher";
+import { ensureFetcherRunning, refreshDetected, getFetcherState } from "@/lib/internshipFetcher";
 import { tectonicAvailable } from "@/lib/localTools";
 
 export const runtime = "nodejs";
@@ -27,6 +27,7 @@ export async function GET(request: Request) {
     scraperConnected,
     scraperFile,
     detectedCount,
+    fetcher: getFetcherState(),
     // Scoring is done by the scraper task (no API key); when aiConfigured is
     // true the in-app Score button also works.
     aiConfigured: aiConfigured(),

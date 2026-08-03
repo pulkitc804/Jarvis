@@ -44,7 +44,7 @@ export function MeetingsWidget() {
             return (
               <div key={m.id} className="flex items-center gap-3 rounded-lg border border-[var(--border)] px-3 py-2.5">
                 <div className="w-20 shrink-0">
-                  <div className="text-[10px] uppercase tracking-wide text-[var(--faint)]">{dayLabel(m.start)}</div>
+                  <div className="text-[10px] text-[var(--faint)]">{dayLabel(m.start)}</div>
                   <div className="tnum text-sm" style={{ color: soon ? "var(--accent)" : "var(--text)" }}>
                     {m.allDay ? "all day" : fmtTime(m.start)}
                   </div>
@@ -57,7 +57,7 @@ export function MeetingsWidget() {
                     </div>
                   )}
                 </div>
-                {soon && <span className="live-dot h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />}
+                {soon && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />}
               </div>
             );
           })}

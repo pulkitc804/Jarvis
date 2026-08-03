@@ -1,26 +1,33 @@
 @import "tailwindcss";
 
+/*
+ * Design notes — deliberately restrained.
+ * Colour carries meaning, never decoration: the surface is a neutral graphite
+ * ramp, and saturation is reserved for status (applied / OA / offer / overdue).
+ * No gradient washes, no glass blur, no glow, no neon. Hierarchy comes from
+ * type weight, spacing and a single hairline border.
+ */
+
 :root {
   color-scheme: dark;
 
-  --bg: #05080f;
-  --panel: rgba(255, 255, 255, 0.025);
-  --panel-strong: rgba(255, 255, 255, 0.05);
-  --border: rgba(120, 190, 255, 0.12);
-  --border-strong: rgba(120, 190, 255, 0.24);
+  --bg: #0b0b0d;
+  --panel: #121215;
+  --panel-strong: #17171b;
+  --border: rgba(255, 255, 255, 0.075);
+  --border-strong: rgba(255, 255, 255, 0.16);
 
-  --text: #e7f1f9;
-  --muted: #8198af;
-  --faint: #56697e;
+  --text: #f0f0f2;
+  --muted: #9a9aa4;
+  --faint: #6a6a73;
 
-  --accent: #3ce0ff;
-  --accent-2: #7c93ff;
-  /* Alias: components reference var(--accent2) in inline styles and arbitrary
-     values, where the Tailwind --color-accent2 token doesn't apply. */
+  /* Desaturated on purpose — these sit next to text, not on a hero banner. */
+  --accent: #7096d8;
+  --accent-2: #8d84cf;
   --accent2: var(--accent-2);
-  --good: #46e08a;
-  --warn: #ffcf5c;
-  --danger: #ff6b7d;
+  --good: #55a978;
+  --warn: #c9973f;
+  --danger: #cf6260;
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
@@ -47,65 +54,78 @@ body {
 }
 
 body {
-  background:
-    radial-gradient(1200px 700px at 78% -8%, rgba(60, 224, 255, 0.08), transparent 60%),
-    radial-gradient(900px 600px at 8% 108%, rgba(124, 147, 255, 0.07), transparent 55%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-}
-
-/* faint HUD grid texture */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    linear-gradient(rgba(120, 190, 255, 0.022) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(120, 190, 255, 0.022) 1px, transparent 1px);
-  background-size: 46px 46px;
-  mask-image: radial-gradient(ellipse 95% 85% at 50% 25%, #000 35%, transparent 100%);
-  z-index: 0;
+  text-rendering: optimizeLegibility;
 }
 
 .panel {
   position: relative;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  backdrop-filter: blur(10px);
-  transition: border-color 0.25s ease, background 0.25s ease;
+  border-radius: 10px;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .panel:hover {
   border-color: var(--border-strong);
-  background: var(--panel-strong);
+}
+
+/* Section label: small, medium weight, normal case. */
+.panel-title {
+  font-size: 13px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* Field label above a number or value. */
+.label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--faint);
 }
 
 .tnum {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+}
+
+.mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
 }
 
-.glow-text {
-  text-shadow: 0 0 18px rgba(60, 224, 255, 0.45);
+/* Focus that is visible without being loud. */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 2px;
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(70, 224, 138, 0.55); }
-  50% { opacity: 0.55; box-shadow: 0 0 0 6px rgba(70, 224, 138, 0); }
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
-.live-dot { animation: pulse-dot 2.2s ease-in-out infinite; }
-
-@keyframes rise {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
-.rise { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+}
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
 
-.scroll-thin { scrollbar-width: thin; scrollbar-color: rgba(120, 190, 255, 0.25) transparent; }
-.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
-.scroll-thin::-webkit-scrollbar-thumb { background: rgba(120, 190, 255, 0.22); border-radius: 99px; }
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

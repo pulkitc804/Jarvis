@@ -91,13 +91,13 @@ export function SessionLimitWidget() {
       {data && (
         <div className="flex flex-col sm:flex-row items-center gap-5">
           <Gauge pct={ringPct} color={ringColor} size={176}>
-            <div className="tnum text-[24px] font-semibold leading-none text-[var(--text)] glow-text">{centerMain}</div>
-            <div className="mt-1 text-[10px] uppercase tracking-[0.16em] text-[var(--faint)]">{centerSub}</div>
+            <div className="tnum text-[24px] font-semibold leading-none text-[var(--text)] ">{centerMain}</div>
+            <div className="mt-1 label">{centerSub}</div>
           </Gauge>
 
           <div className="min-w-0 flex-1 w-full space-y-3.5">
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--faint)]">
+              <div className="label">
                 {officialOk ? "5-hour limit resets in" : sessionActive ? "Session resets in" : "Next window"}
               </div>
               <div className="tnum text-2xl font-semibold text-[var(--text)]">
@@ -108,14 +108,14 @@ export function SessionLimitWidget() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-lg border border-[var(--border)] px-3 py-2">
-                <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">Used this session</div>
+                <div className="label">Used this session</div>
                 <div className="tnum mt-0.5 text-lg font-semibold text-[var(--text)]">
                   {sessionActive ? session.messages.toLocaleString() : 0} <span className="text-[12px] font-normal text-[var(--muted)]">msgs</span>
                 </div>
                 <div className="tnum text-[11px] text-[var(--muted)]">{formatTokens(sessionActive ? session.tokens : 0)} tokens</div>
               </div>
               <div className="rounded-lg border border-[var(--border)] px-3 py-2">
-                <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">Used this week</div>
+                <div className="label">Used this week</div>
                 <div className="tnum mt-0.5 text-lg font-semibold text-[var(--text)]">
                   {(data.week?.messages ?? 0).toLocaleString()} <span className="text-[12px] font-normal text-[var(--muted)]">msgs</span>
                 </div>

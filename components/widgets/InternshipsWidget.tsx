@@ -44,7 +44,7 @@ function Stat({ label, value, accent }: { label: string; value: number | string;
   return (
     <div className="rounded-xl border border-[var(--border)] bg-white/[0.015] px-3.5 py-2.5">
       <div className="tnum text-2xl font-semibold" style={{ color: accent || "var(--text)" }}>{value}</div>
-      <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--faint)]">{label}</div>
+      <div className="label">{label}</div>
     </div>
   );
 }

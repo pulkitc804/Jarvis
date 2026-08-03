@@ -69,6 +69,10 @@ type ScraperJob = {
   url: string;
   location?: string;
   firstSeen?: string;
+  /** Employer's publish time (ISO), when the source reports one. */
+  postedAt?: string;
+  /** Which feed surfaced it: greenhouse | lever | ashby | tracker | reddit | … */
+  source?: string;
   // Optional AI fields the scraper task writes (free, on the subscription).
   score?: number;
   worthTailoring?: boolean;
@@ -108,9 +112,11 @@ export type JobStatus = {
 
 // JobStatus owns firstSeen (number) and the AI fields (nullable), so drop the
 // scraper's own versions of those to avoid type conflicts.
-export type Internship = Omit<ScraperJob, "firstSeen" | "score" | "worthTailoring" | "scoreReason" | "tailoredResume"> & {
+export type Internship = Omit<ScraperJob, "firstSeen" | "postedAt" | "score" | "worthTailoring" | "scoreReason" | "tailoredResume"> & {
   id: string;
   bigTech: boolean;
+  /** Employer publish time in epoch ms, or null when unknown. */
+  postedAt: number | null;
 } & JobStatus;
 
 function readScraperJobs(): ScraperJob[] {
@@ -179,6 +185,7 @@ export function listInternships(): { internships: Internship[]; scraperConnected
       ...j,
       id,
       bigTech: isBigTech(j.company),
+      postedAt: j.postedAt ? Date.parse(j.postedAt) || null : null,
       applied: st.applied ?? false,
       appliedAt: st.appliedAt ?? null,
       stage: st.stage ?? (st.applied ? "applied" : "not_applied"),

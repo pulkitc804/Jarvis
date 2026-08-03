@@ -40,31 +40,25 @@ export function ClockHeader({ name = "Pulkit" }: { name?: string }) {
   const tz = now ? Intl.DateTimeFormat().resolvedOptions().timeZone : "";
 
   return (
-    <header className="relative z-10 flex flex-wrap items-end justify-between gap-4 mb-6">
+    <header className="relative z-10 mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-[var(--border)] pb-5">
       <div>
-        <div className="flex items-center gap-2.5">
-          <span className="live-dot inline-block h-2 w-2 rounded-full bg-[var(--good)]" />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[var(--muted)]">
-            Jarvis · Command Center
-          </span>
-        </div>
-        <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-[var(--text)]">
-          {greeting(hour)}, <span className="glow-text text-[var(--accent)]">{name}</span>.
+        <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[var(--text)]">
+          {greeting(hour)}, {name}
         </h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">{date}</p>
+        <p className="mt-0.5 text-[13px] text-[var(--muted)]">{date}</p>
       </div>
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <button
           onClick={refreshAll}
           title="Refresh all panels now"
-          className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-white/[0.02] px-3 py-2 text-[12px] font-medium text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--accent)]"
+          className="flex items-center gap-1.5 rounded-md border border-[var(--border)] px-2.5 py-1.5 text-[12px] text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--text)]"
         >
-          <RefreshIcon size={14} className={spinning ? "animate-spin" : ""} />
+          <RefreshIcon size={13} className={spinning ? "animate-spin" : ""} />
           <span className="hidden sm:inline">Refresh</span>
         </button>
         <div className="text-right">
-          <div className="tnum text-3xl sm:text-4xl font-medium text-[var(--text)] glow-text">{time}</div>
-          <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--faint)]">{tz || " "}</div>
+          <div className="tnum text-[26px] font-medium leading-none text-[var(--text)]">{time}</div>
+          <div className="mt-1 text-[11px] text-[var(--faint)]">{tz || " "}</div>
         </div>
       </div>
     </header>
