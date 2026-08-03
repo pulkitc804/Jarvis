@@ -1,4 +1,12 @@
-import { allJobUrls, listInternships, updateJob, upcomingDeadlines, type Stage } from "@/lib/internships";
+import {
+  allJobUrls,
+  listInternships,
+  readHiddenCompanies,
+  setCompanyHidden,
+  updateJob,
+  upcomingDeadlines,
+  type Stage,
+} from "@/lib/internships";
 import { ensureLinkSweeper } from "@/lib/linkHealth";
 import { addManualJob, deleteManualJob } from "@/lib/manualJobs";
 import { aiConfigured } from "@/lib/aiClient";
@@ -30,6 +38,7 @@ export async function GET(request: Request) {
     scraperConnected,
     scraperFile,
     detectedCount,
+    hiddenCompanies: readHiddenCompanies(),
     fetcher: getFetcherState(),
     // Scoring is done by the scraper task (no API key); when aiConfigured is
     // true the in-app Score button also works.
@@ -48,10 +57,20 @@ export async function POST(request: Request) {
     stage?: Stage;
     deadlineAt?: number | null;
     deadlineLabel?: string | null;
+    referral?: boolean;
+    favorite?: boolean;
+    hidden?: boolean;
     notes?: string;
     // manual add
     add?: { company?: string; role?: string; url?: string; location?: string; via?: string };
+    // mute/unmute an entire company
+    hideCompany?: { company: string; hidden: boolean };
   };
+
+  if (b.hideCompany?.company) {
+    const list = setCompanyHidden(b.hideCompany.company, b.hideCompany.hidden);
+    return Response.json({ ok: true, hiddenCompanies: list });
+  }
 
   // Hand-entered role (Instagram, Discord, a referral — anywhere a feed can't reach).
   if (b.add) {
@@ -69,6 +88,9 @@ export async function POST(request: Request) {
     stage: b.stage,
     deadlineAt: b.deadlineAt,
     deadlineLabel: b.deadlineLabel,
+    referral: b.referral,
+    favorite: b.favorite,
+    hidden: b.hidden,
     notes: b.notes,
   });
   return Response.json({ ok: true });

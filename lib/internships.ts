@@ -26,6 +26,7 @@ const SCRAPER_FILE = path.join(
 );
 const DATA_DIR = path.join(process.cwd(), "data");
 const STATUS_FILE = path.join(DATA_DIR, "internships.json");
+const HIDDEN_COMPANIES_FILE = path.join(DATA_DIR, "hidden-companies.json");
 
 // Recognized big-tech / name-brand companies. Edit freely — matching is
 // case-insensitive and word-boundary aware.
@@ -106,6 +107,10 @@ export type JobStatus = {
   stageUpdatedAt: number | null;
   deadlineAt: number | null; // next OA/interview deadline the user is tracking
   deadlineLabel: string | null; // e.g. "OA due", "Final round"
+  referral: boolean; // someone is referring you for this specific role
+  referralAt: number | null;
+  favorite: boolean; // starred — the roles you actually care about
+  hidden: boolean; // dismissed from the ledger to cut noise
   firstSeen: number;
   score: number | null; // 0-100 resume↔role similarity
   worthTailoring: boolean | null;
@@ -158,7 +163,36 @@ function writeStatusMap(map: StatusMap) {
 }
 
 function jobId(j: ScraperJob): string {
+  // Hand-added roles keep their own stable id: their URL is optional and can be
+  // edited, so keying them by URL would orphan their stage/deadline state.
+  if (j.manualId) return j.manualId;
   return (j.url || `${j.company}::${j.role}`).trim();
+}
+
+/* Companies muted wholesale — every current and future role from them is
+   hidden, so a company you don't care about stops cluttering the ledger. */
+export function readHiddenCompanies(): string[] {
+  try {
+    const a = JSON.parse(fs.readFileSync(HIDDEN_COMPANIES_FILE, "utf8"));
+    return Array.isArray(a) ? a : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeHiddenCompanies(list: string[]) {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const tmp = path.join(DATA_DIR, `hidden-companies.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(list, null, 2), "utf8");
+  fs.renameSync(tmp, HIDDEN_COMPANIES_FILE);
+}
+
+export function setCompanyHidden(company: string, hidden: boolean): string[] {
+  const key = normalizeCompany(company);
+  const list = readHiddenCompanies().filter((c) => c !== key);
+  if (hidden) list.push(key);
+  writeHiddenCompanies(list);
+  return list;
 }
 
 export function scraperExists(): boolean {
@@ -197,6 +231,7 @@ export function listInternships(): { internships: Internship[]; scraperConnected
   const jobs = mergedJobs();
   const map = readStatusMap();
   const health = getLinkHealth();
+  const hiddenCompanies = new Set(readHiddenCompanies());
   let dirty = false;
   const now = Date.now();
 
@@ -221,6 +256,10 @@ export function listInternships(): { internships: Internship[]; scraperConnected
       stageUpdatedAt: st.stageUpdatedAt ?? null,
       deadlineAt: st.deadlineAt ?? null,
       deadlineLabel: st.deadlineLabel ?? null,
+      referral: st.referral ?? false,
+      referralAt: st.referralAt ?? null,
+      favorite: st.favorite ?? false,
+      hidden: (st.hidden ?? false) || hiddenCompanies.has(normalizeCompany(j.company)),
       firstSeen: st.firstSeen ?? now,
       // Prefer scores the scraper wrote into seen_jobs.json; fall back to any
       // written by Jarvis's own /api/internships/score (if an API key is added).
@@ -259,7 +298,11 @@ export function updateJob(id: string, patch: Partial<JobStatus>): void {
     cur.applied = patch.stage !== "not_applied";
     cur.appliedAt = cur.applied ? cur.appliedAt ?? Date.now() : null;
   }
-  for (const k of ["score", "worthTailoring", "scoreReason", "tailoredResume", "tailorRequested", "tailorRequestedAt", "deadlineAt", "deadlineLabel", "notes", "firstSeen"] as const) {
+  if (patch.referral !== undefined) {
+    cur.referral = patch.referral;
+    cur.referralAt = patch.referral ? Date.now() : null;
+  }
+  for (const k of ["score", "worthTailoring", "scoreReason", "tailoredResume", "tailorRequested", "tailorRequestedAt", "deadlineAt", "deadlineLabel", "favorite", "hidden", "notes", "firstSeen"] as const) {
     if (patch[k] !== undefined) (cur as Record<string, unknown>)[k] = patch[k];
   }
   map[id] = cur;

@@ -44,6 +44,9 @@ type Internship = {
   stage: Stage;
   deadlineAt: number | null;
   deadlineLabel: string | null;
+  referral: boolean;
+  favorite: boolean;
+  hidden: boolean;
   firstSeen: number;
   /** Employer publish time when the source reports one, else null. */
   postedAt: number | null;
@@ -150,6 +153,10 @@ export function InternshipTracker() {
   const [sortBy, setSortBy] = useState<"recent" | "score">("recent");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [showAdd, setShowAdd] = useState(false);
+  // Dead postings are hidden by default — a link that 404s is noise.
+  const [showDead, setShowDead] = useState(false);
+  const [favOnly, setFavOnly] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
 
   const load = useCallback(
     async (force = false) => {
@@ -243,6 +250,34 @@ export function InternshipTracker() {
     }
   }
 
+  async function patchJob(job: Internship, patch: Record<string, unknown>) {
+    setData((d) => (d ? { ...d, internships: d.internships.map((j) => (j.id === job.id ? { ...j, ...patch } : j)) } : d));
+    await fetch("/api/internships", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: job.id, ...patch }),
+    });
+  }
+
+  async function hideCompany(company: string, hidden: boolean) {
+    await fetch("/api/internships", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hideCompany: { company, hidden } }),
+    });
+    load(false);
+  }
+
+  async function toggleReferral(job: Internship) {
+    const next = !job.referral;
+    setData((d) => (d ? { ...d, internships: d.internships.map((j) => (j.id === job.id ? { ...j, referral: next } : j)) } : d));
+    await fetch("/api/internships", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: job.id, referral: next }),
+    });
+  }
+
   async function removeManual(job: Internship) {
     if (!job.manualId) return;
     await fetch(`/api/internships?id=${encodeURIComponent(job.manualId)}`, { method: "DELETE" });
@@ -250,8 +285,15 @@ export function InternshipTracker() {
   }
 
   const allJobs = data?.internships || [];
+  const deadCount = allJobs.filter((j) => j.linkVerdict === "dead" && !j.hidden).length;
+  const hiddenCount = allJobs.filter((j) => j.hidden).length;
+  const favCount = allJobs.filter((j) => j.favorite).length;
   const jobs = allJobs
+    .filter((j) => (showHidden ? j.hidden : !j.hidden))
+    .filter((j) => !favOnly || j.favorite)
     .filter((j) => stageFilter === "all" || j.stage === stageFilter)
+    // Keep a dead posting visible if you've already engaged with it.
+    .filter((j) => showDead || j.linkVerdict !== "dead" || j.stage !== "not_applied")
     .slice()
     .sort((a, b) =>
       sortBy === "score"
@@ -345,6 +387,33 @@ export function InternshipTracker() {
       {data && (
         <div className="mb-4 flex flex-wrap gap-1.5">
           <button
+            onClick={() => setFavOnly((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition"
+            style={
+              favOnly
+                ? { borderColor: "var(--warn)", background: "color-mix(in srgb, var(--warn) 14%, transparent)", color: "var(--warn)" }
+                : { borderColor: "var(--border)", color: "var(--muted)" }
+            }
+            title="Show only starred roles"
+          >
+            ★ Favorites ({favCount})
+          </button>
+          {hiddenCount > 0 && (
+            <button
+              onClick={() => setShowHidden((v) => !v)}
+              className="rounded-md border px-2.5 py-1 text-[11px] font-medium transition"
+              style={
+                showHidden
+                  ? { borderColor: "var(--accent)", color: "var(--accent)" }
+                  : { borderColor: "var(--border)", color: "var(--faint)" }
+              }
+              title="Roles and companies you've dismissed"
+            >
+              {showHidden ? "← Back to ledger" : `Hidden (${hiddenCount})`}
+            </button>
+          )}
+          <span className="mx-1 w-px self-stretch bg-[var(--border)]" />
+          <button
             onClick={() => setStageFilter("all")}
             className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition ${stageFilter === "all" ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--border-strong)]"}`}
           >
@@ -386,6 +455,20 @@ export function InternshipTracker() {
               </span>
             ))}
           </span>
+          {deadCount > 0 && (
+            <button
+              onClick={() => setShowDead((v) => !v)}
+              className="rounded border px-2 py-0.5 text-[11px] transition"
+              style={
+                showDead
+                  ? { borderColor: "color-mix(in srgb, var(--danger) 45%, transparent)", color: "var(--danger)" }
+                  : { borderColor: "var(--border)", color: "var(--faint)" }
+              }
+              title="Postings whose link 404s are hidden from the ledger"
+            >
+              {showDead ? `showing ${deadCount} dead` : `${deadCount} dead hidden`}
+            </button>
+          )}
           <span className="ml-auto text-[var(--faint)]">
             {data.fetcher.scanned != null && `${data.fetcher.scanned} matches scanned`}
             {data.fetcher.ms != null && ` in ${(data.fetcher.ms / 1000).toFixed(1)}s`}
@@ -464,8 +547,34 @@ export function InternshipTracker() {
                     best fit {best}
                   </span>
                 )}
+                {list.some((j) => j.referral) && (
+                  <span className="text-[11px]" style={{ color: "var(--good)" }} title="You have a referral at this company">
+                    ✓ referral
+                  </span>
+                )}
                 <span className="ml-auto text-[11px] text-[var(--faint)]">
                   latest {relAge(newest)}
+                </span>
+                {/* Not a nested <button> — that's invalid HTML inside the header
+                    button — so this is a span acting as the mute control. */}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void hideCompany(company, !showHidden);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      void hideCompany(company, !showHidden);
+                    }
+                  }}
+                  className="rounded border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--faint)] transition hover:border-[var(--danger)] hover:text-[var(--danger)]"
+                  title={showHidden ? `Unmute ${company}` : `Mute ${company} — hide all of its roles, now and later`}
+                >
+                  {showHidden ? "unmute" : "mute"}
                 </span>
               </button>
 
@@ -565,6 +674,39 @@ export function InternshipTracker() {
             {/* actions */}
             <div className="flex shrink-0 items-center gap-2">
               <button
+                onClick={() => patchJob(j, { favorite: !j.favorite })}
+                className="grid h-7 w-7 place-items-center rounded-md border transition"
+                style={
+                  j.favorite
+                    ? { borderColor: "color-mix(in srgb, var(--warn) 50%, transparent)", background: "color-mix(in srgb, var(--warn) 14%, transparent)", color: "var(--warn)" }
+                    : { borderColor: "var(--border)", color: "var(--faint)" }
+                }
+                title={j.favorite ? "Remove from favorites" : "Add to favorites"}
+                aria-pressed={j.favorite}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill={j.favorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                </svg>
+              </button>
+              <button
+                onClick={() => toggleReferral(j)}
+                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition"
+                style={
+                  j.referral
+                    ? { borderColor: "color-mix(in srgb, var(--good) 50%, transparent)", background: "color-mix(in srgb, var(--good) 14%, transparent)", color: "var(--good)" }
+                    : { borderColor: "var(--border)", color: "var(--faint)" }
+                }
+                title={j.referral ? "You have a referral for this role" : "Mark that you have a referral for this role"}
+                aria-pressed={j.referral}
+              >
+                {j.referral ? (
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : null}
+                Referral
+              </button>
+              <button
                 onClick={() => setDeadlineEditor(j)}
                 className="rounded-md border px-2 py-1 text-[11px] transition"
                 style={{ borderColor: j.deadlineAt ? "var(--warn)" : "var(--border)", color: j.deadlineAt ? "var(--warn)" : "var(--muted)" }}
@@ -600,35 +742,56 @@ export function InternshipTracker() {
                   {busy[j.id] === "tailor" ? (data?.tailoringInstant ? "Tailoring…" : "Requesting…") : data?.tailoringInstant ? "Tailor now" : "Tailor this"}
                 </button>
               )}
-              {j.manual && j.manualId && (
+              {j.manual && j.manualId ? (
                 <button
                   onClick={() => removeManual(j)}
                   className="rounded-md border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--faint)] transition hover:border-[var(--danger)] hover:text-[var(--danger)]"
-                  title="Remove this hand-added role"
+                  title="Delete this hand-added role"
                 >
                   ✕
                 </button>
+              ) : (
+                <button
+                  onClick={() => patchJob(j, { hidden: !j.hidden })}
+                  className="rounded-md border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--faint)] transition hover:border-[var(--border-strong)] hover:text-[var(--text)]"
+                  title={j.hidden ? "Restore this role to the ledger" : "Hide this role — you don't care about it"}
+                >
+                  {j.hidden ? "Restore" : "Hide"}
+                </button>
               )}
-              {j.url ? (
+              {j.linkVerdict === "dead" ? (
+                // The original link is gone — send them somewhere useful instead
+                // of handing over a URL we know 404s.
+                <a
+                  href={`https://www.google.com/search?q=${encodeURIComponent(`${j.company} ${j.role} apply`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-md border px-2.5 py-1 text-[11px] transition"
+                  style={{ borderColor: "color-mix(in srgb, var(--danger) 45%, transparent)", color: "var(--danger)" }}
+                  title="This posting's link is dead (404 or 'job not found'). Search for it instead."
+                >
+                  Dead · search ↗
+                </a>
+              ) : j.url ? (
                 <a
                   href={j.url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="rounded-md border px-2.5 py-1 text-[11px] transition hover:border-[var(--border-strong)]"
                   style={
-                    j.linkVerdict === "dead"
-                      ? { borderColor: "color-mix(in srgb, var(--danger) 45%, transparent)", color: "var(--danger)" }
-                      : { borderColor: "var(--border)", color: "var(--muted)" }
+                    j.linkVerdict === "ok"
+                      ? { borderColor: "var(--border)", color: "var(--muted)" }
+                      : { borderColor: "var(--border)", color: "var(--faint)" }
                   }
                   title={
-                    j.linkVerdict === "dead"
-                      ? "Last check returned 404 — this posting looks closed"
+                    j.linkVerdict === "ok"
+                      ? "Link checked and working"
                       : j.linkVerdict === "blocked"
-                        ? "The careers site blocks automated checks; the link should still work in your browser"
-                        : "Open the posting"
+                        ? "Couldn't verify — the careers site blocks automated checks, so this may or may not still be open"
+                        : "Not verified yet"
                   }
                 >
-                  {j.linkVerdict === "dead" ? "Link dead" : "Apply ↗"}
+                  {j.linkVerdict === "ok" ? "Apply ↗" : "Apply ?"}
                 </a>
               ) : (
                 <span className="text-[11px] text-[var(--faint)]">no link</span>
