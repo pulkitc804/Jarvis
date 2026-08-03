@@ -10,6 +10,7 @@ export async function POST(request: Request) {
     text?: string;
     inReplyTo?: string;
     references?: string;
+    accountId?: string | null;
   };
   if (!body.to || !body.text) {
     return Response.json({ ok: false, error: "Recipient and message body are required." }, { status: 400 });
@@ -20,6 +21,7 @@ export async function POST(request: Request) {
     text: body.text,
     inReplyTo: body.inReplyTo,
     references: body.references,
+    accountId: body.accountId || undefined,
   });
   return Response.json(result, { status: result.ok ? 200 : 500 });
 }

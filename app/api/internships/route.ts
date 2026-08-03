@@ -8,6 +8,7 @@ import {
   type Stage,
 } from "@/lib/internships";
 import { ensureLinkSweeper } from "@/lib/linkHealth";
+import { ensureDigestScheduler } from "@/lib/jobDigestMail";
 import { addManualJob, deleteManualJob } from "@/lib/manualJobs";
 import { aiConfigured } from "@/lib/aiClient";
 import { ensureFetcherRunning, refreshDetected, getFetcherState } from "@/lib/internshipFetcher";
@@ -20,6 +21,7 @@ export async function GET(request: Request) {
   // Kick off the background loops (once per server lifetime).
   ensureFetcherRunning();
   ensureLinkSweeper(allJobUrls);
+  ensureDigestScheduler();
   const url = new URL(request.url);
   // ?refresh=1 forces an immediate fetch (used by the refresh buttons) so new
   // roles appear on demand instead of only on the ~5-min background cadence.

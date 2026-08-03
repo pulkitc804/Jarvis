@@ -9,28 +9,73 @@ import nodemailer from "nodemailer";
  * server-side; nothing is sent without an explicit user action in the UI.
  */
 
-type Cfg = { host: string; port: number; user: string; pass: string; smtpHost: string; smtpPort: number };
+type Cfg = {
+  id: string;
+  label: string;
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+  smtpHost: string;
+  smtpPort: number;
+};
 
-function config(): Cfg | null {
-  const gUser = process.env.GMAIL_IMAP_USER;
-  const gPass = process.env.GMAIL_IMAP_APP_PASSWORD;
-  if (gUser && gPass) {
-    return { host: "imap.gmail.com", port: 993, user: gUser, pass: gPass, smtpHost: "smtp.gmail.com", smtpPort: 465 };
+/**
+ * Every configured mailbox. Rutgers ScarletMail is Google Workspace, so it uses
+ * the same imap.gmail.com endpoints — it just needs its own App Password.
+ */
+export function accounts(): Cfg[] {
+  const list: Cfg[] = [];
+  const g = (k: string) => process.env[k];
+
+  if (g("GMAIL_IMAP_USER") && g("GMAIL_IMAP_APP_PASSWORD")) {
+    list.push({
+      id: "personal",
+      label: g("GMAIL_IMAP_USER") as string,
+      host: "imap.gmail.com",
+      port: 993,
+      user: g("GMAIL_IMAP_USER") as string,
+      pass: g("GMAIL_IMAP_APP_PASSWORD") as string,
+      smtpHost: "smtp.gmail.com",
+      smtpPort: 465,
+    });
   }
-  const host = process.env.IMAP_HOST;
-  const user = process.env.IMAP_USER;
-  const pass = process.env.IMAP_PASSWORD;
-  if (host && user && pass) {
-    return {
-      host,
-      port: Number(process.env.IMAP_PORT || 993),
-      user,
-      pass,
-      smtpHost: process.env.SMTP_HOST || host.replace(/^imap/, "smtp"),
-      smtpPort: Number(process.env.SMTP_PORT || 465),
-    };
+  if (g("RUTGERS_IMAP_USER") && g("RUTGERS_IMAP_APP_PASSWORD")) {
+    list.push({
+      id: "rutgers",
+      label: g("RUTGERS_IMAP_USER") as string,
+      host: g("RUTGERS_IMAP_HOST") || "imap.gmail.com",
+      port: Number(g("RUTGERS_IMAP_PORT") || 993),
+      user: g("RUTGERS_IMAP_USER") as string,
+      pass: g("RUTGERS_IMAP_APP_PASSWORD") as string,
+      smtpHost: g("RUTGERS_SMTP_HOST") || "smtp.gmail.com",
+      smtpPort: Number(g("RUTGERS_SMTP_PORT") || 465),
+    });
   }
-  return null;
+  if (g("IMAP_HOST") && g("IMAP_USER") && g("IMAP_PASSWORD")) {
+    list.push({
+      id: "other",
+      label: g("IMAP_USER") as string,
+      host: g("IMAP_HOST") as string,
+      port: Number(g("IMAP_PORT") || 993),
+      user: g("IMAP_USER") as string,
+      pass: g("IMAP_PASSWORD") as string,
+      smtpHost: g("SMTP_HOST") || (g("IMAP_HOST") as string).replace(/^imap/, "smtp"),
+      smtpPort: Number(g("SMTP_PORT") || 465),
+    });
+  }
+  return list;
+}
+
+export function accountList(): Array<{ id: string; label: string }> {
+  return accounts().map((a) => ({ id: a.id, label: a.label }));
+}
+
+function config(accountId?: string): Cfg | null {
+  const all = accounts();
+  if (all.length === 0) return null;
+  if (!accountId) return all[0];
+  return all.find((a) => a.id === accountId) || all[0];
 }
 
 function newClient(cfg: Cfg) {
@@ -65,13 +110,15 @@ export type MailListItem = {
   subject: string;
   date: number;
   unread: boolean;
+  flagged: boolean;
+  account: string;
 };
 export type MailListResult =
   | { connected: true; unread: number; total: number; messages: MailListItem[] }
   | { connected: false; reason: string };
 
-export async function listMessages(limit = 40): Promise<MailListResult> {
-  const cfg = config();
+export async function listMessages(limit = 40, accountId?: string): Promise<MailListResult> {
+  const cfg = config(accountId);
   if (!cfg) return { connected: false, reason: "Email not configured (GMAIL_IMAP_USER + GMAIL_IMAP_APP_PASSWORD)." };
   const client = newClient(cfg);
   try {
@@ -97,6 +144,8 @@ export async function listMessages(limit = 40): Promise<MailListResult> {
             subject: env?.subject || "(no subject)",
             date: env?.date ? new Date(env.date).getTime() : Date.now(),
             unread: !(msg.flags?.has("\\Seen") ?? false),
+            flagged: msg.flags?.has("\\Flagged") ?? false,
+            account: cfg.id,
           });
         }
       }
@@ -128,8 +177,11 @@ export type FullMessage = {
   references: string;
 };
 
-export async function getMessage(uid: string): Promise<{ ok: true; message: FullMessage } | { ok: false; reason: string }> {
-  const cfg = config();
+export async function getMessage(
+  uid: string,
+  accountId?: string,
+): Promise<{ ok: true; message: FullMessage } | { ok: false; reason: string }> {
+  const cfg = config(accountId);
   if (!cfg) return { ok: false, reason: "Email not configured." };
   const client = newClient(cfg);
   try {
@@ -178,14 +230,59 @@ export async function getMessage(uid: string): Promise<{ ok: true; message: Full
   }
 }
 
+export type MailAction = "read" | "unread" | "star" | "unstar" | "archive" | "delete";
+
+/** Flag / move operations on a message. Archive and delete move to Gmail's
+ *  All Mail and Trash respectively, matching what the web client does. */
+export async function actOnMessage(
+  uid: string,
+  action: MailAction,
+  accountId?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const cfg = config(accountId);
+  if (!cfg) return { ok: false, error: "Email not configured." };
+  const client = newClient(cfg);
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock("INBOX");
+    try {
+      if (action === "read") await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
+      else if (action === "unread") await client.messageFlagsRemove(uid, ["\\Seen"], { uid: true });
+      else if (action === "star") await client.messageFlagsAdd(uid, ["\\Flagged"], { uid: true });
+      else if (action === "unstar") await client.messageFlagsRemove(uid, ["\\Flagged"], { uid: true });
+      else if (action === "delete") {
+        const trash = cfg.host.includes("gmail") ? "[Gmail]/Trash" : "Trash";
+        await client.messageMove(uid, trash, { uid: true });
+      } else if (action === "archive") {
+        // Gmail archives by removing the message from INBOX entirely.
+        if (cfg.host.includes("gmail")) await client.messageMove(uid, "[Gmail]/All Mail", { uid: true });
+        else await client.messageFlagsAdd(uid, ["\\Deleted"], { uid: true });
+      }
+    } finally {
+      lock.release();
+    }
+    await client.logout();
+    return { ok: true };
+  } catch (e) {
+    try {
+      await client.close();
+    } catch {
+      /* ignore */
+    }
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
 export async function sendMail(opts: {
   to: string;
   subject: string;
   text: string;
+  html?: string;
   inReplyTo?: string;
   references?: string;
+  accountId?: string;
 }): Promise<{ ok: boolean; error?: string; id?: string }> {
-  const cfg = config();
+  const cfg = config(opts.accountId);
   if (!cfg) return { ok: false, error: "Email not configured." };
   if (!opts.to.trim()) return { ok: false, error: "Recipient is required." };
   const transport = nodemailer.createTransport({
@@ -200,6 +297,7 @@ export async function sendMail(opts: {
       to: opts.to,
       subject: opts.subject,
       text: opts.text,
+      html: opts.html || undefined,
       inReplyTo: opts.inReplyTo || undefined,
       references: opts.references || undefined,
     });

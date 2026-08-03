@@ -12,8 +12,17 @@ type MailListItem = {
   subject: string;
   date: number;
   unread: boolean;
+  flagged: boolean;
+  account: string;
 };
-type ListResp = { connected: true; unread: number; total: number; messages: MailListItem[] } | { connected: false; reason: string };
+type Account = { id: string; label: string };
+type ListResp = (
+  | { connected: true; unread: number; total: number; messages: MailListItem[] }
+  | { connected: false; reason: string }
+) & { accounts?: Account[]; account?: string | null };
+
+type Filter = "all" | "unread" | "starred";
+type MailAction = "read" | "unread" | "star" | "unstar" | "archive" | "delete";
 type FullMessage = {
   uid: string;
   from: string;
@@ -42,11 +51,20 @@ export function MailClient() {
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<{ ok: boolean; text: string } | null>(null);
 
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [account, setAccount] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [query, setQuery] = useState("");
+  const [busyUid, setBusyUid] = useState<string | null>(null);
+
   const loadList = useCallback(async () => {
     setLoadingList(true);
     try {
-      const res = await fetch("/api/mail?limit=60", { cache: "no-store" });
+      const q = account ? `&account=${encodeURIComponent(account)}` : "";
+      const res = await fetch(`/api/mail?limit=60${q}`, { cache: "no-store" });
       const json = (await res.json()) as ListResp;
+      if (json.accounts) setAccounts(json.accounts);
+      if (!account && json.account) setAccount(json.account);
       if (json.connected) {
         setList(json.messages);
         setUnread(json.unread);
@@ -59,7 +77,49 @@ export function MailClient() {
     } finally {
       setLoadingList(false);
     }
-  }, []);
+  }, [account]);
+
+  /** Flag/move a message, updating the row optimistically. */
+  async function act(uid: string, action: MailAction) {
+    setBusyUid(uid);
+    try {
+      setList((rows) =>
+        action === "archive" || action === "delete"
+          ? rows.filter((r) => r.uid !== uid)
+          : rows.map((r) =>
+              r.uid === uid
+                ? {
+                    ...r,
+                    unread: action === "unread" ? true : action === "read" ? false : r.unread,
+                    flagged: action === "star" ? true : action === "unstar" ? false : r.flagged,
+                  }
+                : r,
+            ),
+      );
+      await fetch("/api/mail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, action, account }),
+      });
+      if (action === "archive" || action === "delete") {
+        if (selected === uid) {
+          setSelected(null);
+          setMsg(null);
+        }
+      }
+    } finally {
+      setBusyUid(null);
+      loadList();
+    }
+  }
+
+  const visible = list
+    .filter((m) => (filter === "unread" ? m.unread : filter === "starred" ? m.flagged : true))
+    .filter((m) => {
+      if (!query.trim()) return true;
+      const q = query.toLowerCase();
+      return m.subject.toLowerCase().includes(q) || m.from.toLowerCase().includes(q) || m.fromAddress.toLowerCase().includes(q);
+    });
 
   useEffect(() => {
     loadList();
@@ -75,7 +135,8 @@ export function MailClient() {
     setLoadingMsg(true);
     setSendStatus(null);
     try {
-      const res = await fetch(`/api/mail/${encodeURIComponent(uid)}`, { cache: "no-store" });
+      const acc = account ? `?account=${encodeURIComponent(account)}` : "";
+      const res = await fetch(`/api/mail/${encodeURIComponent(uid)}${acc}`, { cache: "no-store" });
       const json = await res.json();
       if (json.ok) {
         const m = json.message as FullMessage;
@@ -105,6 +166,7 @@ export function MailClient() {
           text: replyText,
           inReplyTo: msg.messageId,
           references: [msg.references, msg.messageId].filter(Boolean).join(" "),
+          accountId: account,
         }),
       });
       const json = await res.json();
@@ -135,6 +197,32 @@ export function MailClient() {
         </span>
         <h1 className="text-xl font-semibold text-[var(--text)]">Mailbox</h1>
         <span className="tnum text-[12px] text-[var(--warn)]">{unread.toLocaleString()} unread</span>
+
+        {/* account switcher */}
+        {accounts.length > 1 && (
+          <div className="flex items-center gap-1 rounded-lg border border-[var(--border)] p-0.5">
+            {accounts.map((a) => (
+              <button
+                key={a.id}
+                onClick={() => {
+                  setAccount(a.id);
+                  setSelected(null);
+                  setMsg(null);
+                }}
+                className="rounded-md px-2.5 py-1 text-[12px] transition"
+                style={
+                  account === a.id
+                    ? { background: "color-mix(in srgb, var(--accent) 16%, transparent)", color: "var(--accent)" }
+                    : { color: "var(--muted)" }
+                }
+                title={a.label}
+              >
+                {a.label.split("@")[0]}
+              </button>
+            ))}
+          </div>
+        )}
+
         <button
           onClick={loadList}
           className="ml-auto grid h-8 w-8 place-items-center rounded-lg border border-[var(--border)] text-[var(--muted)] transition hover:text-[var(--accent)]"
@@ -144,30 +232,78 @@ export function MailClient() {
         </button>
       </header>
 
+      {/* filters + search */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {(["all", "unread", "starred"] as Filter[]).map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className="rounded-md border px-2.5 py-1 text-[12px] capitalize transition"
+            style={
+              filter === f
+                ? { borderColor: "var(--accent)", color: "var(--accent)" }
+                : { borderColor: "var(--border)", color: "var(--muted)" }
+            }
+          >
+            {f}
+            {f === "unread" && unread > 0 ? ` (${unread})` : ""}
+          </button>
+        ))}
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search sender or subject…"
+          className="min-w-[220px] flex-1 rounded-md border border-[var(--border)] bg-transparent px-2.5 py-1.5 text-[13px] text-[var(--text)] outline-none focus:border-[var(--accent)]"
+        />
+        <span className="text-[11px] text-[var(--faint)]">
+          {visible.length} of {list.length}
+        </span>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
         {/* list */}
         <section className="panel scroll-thin max-h-[76vh] overflow-y-auto p-1.5">
           {listErr && <div className="p-4 text-sm text-[var(--danger)]">{listErr}</div>}
           {!listErr && loadingList && list.length === 0 && <div className="p-4 text-sm text-[var(--muted)]">Loading inbox…</div>}
-          {list.map((m) => (
-            <button
+          {!listErr && !loadingList && visible.length === 0 && (
+            <div className="p-4 text-sm text-[var(--muted)]">No messages match this view.</div>
+          )}
+          {visible.map((m) => (
+            <div
               key={m.uid}
-              onClick={() => open(m.uid)}
-              className={`flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left transition ${
+              className={`group flex items-start gap-2.5 rounded-lg px-3 py-2.5 transition ${
                 selected === m.uid ? "bg-white/[0.05]" : "hover:bg-white/[0.025]"
-              }`}
+              } ${busyUid === m.uid ? "opacity-50" : ""}`}
             >
-              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${m.unread ? "bg-[var(--warn)]" : "bg-transparent"}`} />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-baseline justify-between gap-2">
-                  <span className={`truncate text-[13px] ${m.unread ? "font-semibold text-[var(--text)]" : "text-[var(--muted)]"}`}>
-                    {m.from}
+              <button onClick={() => open(m.uid)} className="flex min-w-0 flex-1 items-start gap-2.5 text-left">
+                <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${m.unread ? "bg-[var(--warn)]" : "bg-transparent"}`} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span className={`truncate text-[13px] ${m.unread ? "font-semibold text-[var(--text)]" : "text-[var(--muted)]"}`}>
+                      {m.from}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-[var(--faint)]">{relativeTime(m.date)}</span>
                   </span>
-                  <span className="shrink-0 text-[10px] text-[var(--faint)]">{relativeTime(m.date)}</span>
+                  <span className={`block truncate text-[13px] ${m.unread ? "text-[var(--text)]" : "text-[var(--muted)]"}`}>{m.subject}</span>
                 </span>
-                <span className={`block truncate text-[13px] ${m.unread ? "text-[var(--text)]" : "text-[var(--muted)]"}`}>{m.subject}</span>
+              </button>
+              {/* row actions */}
+              <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+                <MailRowAction label={m.flagged ? "Unstar" : "Star"} onClick={() => act(m.uid, m.flagged ? "unstar" : "star")} active={m.flagged}>
+                  ★
+                </MailRowAction>
+                <MailRowAction label={m.unread ? "Mark read" : "Mark unread"} onClick={() => act(m.uid, m.unread ? "read" : "unread")}>
+                  {m.unread ? "◍" : "○"}
+                </MailRowAction>
+                <MailRowAction label="Archive" onClick={() => act(m.uid, "archive")}>
+                  ⤓
+                </MailRowAction>
+                <MailRowAction label="Delete" onClick={() => act(m.uid, "delete")} danger>
+                  ✕
+                </MailRowAction>
               </span>
-            </button>
+              {m.flagged && <span className="mt-1 shrink-0 text-[11px] text-[var(--warn)] group-hover:hidden">★</span>}
+            </div>
           ))}
         </section>
 
@@ -230,5 +366,35 @@ export function MailClient() {
         </section>
       </div>
     </main>
+  );
+}
+
+/** Small icon-ish button used for the per-message row actions. */
+function MailRowAction({
+  label,
+  onClick,
+  children,
+  active,
+  danger,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+  active?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      title={label}
+      aria-label={label}
+      className="grid h-6 w-6 place-items-center rounded text-[12px] transition hover:bg-white/[0.06]"
+      style={{ color: active ? "var(--warn)" : danger ? "var(--faint)" : "var(--muted)" }}
+    >
+      {children}
+    </button>
   );
 }

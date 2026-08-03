@@ -171,12 +171,29 @@ export function InternshipTracker() {
     [bigTechOnly],
   );
 
-  // Initial load forces a live tracker fetch; then auto-refresh every 20s so new
-  // roles appear without touching anything.
+  // Anything Jarvis detected after your last manual refresh counts as "new" —
+  // persisted so the marker survives a reload.
+  const [seenAt, setSeenAt] = useState<number>(() => {
+    if (typeof window === "undefined") return Date.now();
+    return Number(localStorage.getItem("jarvis.internships.seenAt")) || Date.now();
+  });
+
+  function markAllSeen() {
+    const now = Date.now();
+    localStorage.setItem("jarvis.internships.seenAt", String(now));
+    setSeenAt(now);
+  }
+
+  // Force a live scrape on open, then every 5 minutes; a cheap re-read every
+  // 20s in between picks up whatever the background fetcher found.
   useEffect(() => {
     load(true);
-    const t = setInterval(() => load(false), 20000);
-    return () => clearInterval(t);
+    const quick = setInterval(() => load(false), 20_000);
+    const full = setInterval(() => load(true), 5 * 60_000);
+    return () => {
+      clearInterval(quick);
+      clearInterval(full);
+    };
   }, [load]);
 
   async function setStage(job: Internship, stage: Stage) {
@@ -351,7 +368,14 @@ export function InternshipTracker() {
           >
             {bigTechOnly ? "Big tech only" : "Showing all"}
           </button>
-          <button onClick={() => load(true)} className="grid h-9 w-9 place-items-center rounded-lg border border-[var(--border)] text-[var(--muted)] transition hover:text-[var(--accent)]" title="Refresh — fetch the trackers now">
+          <button
+            onClick={() => {
+              markAllSeen();
+              load(true);
+            }}
+            className="grid h-9 w-9 place-items-center rounded-lg border border-[var(--border)] text-[var(--muted)] transition hover:text-[var(--accent)]"
+            title="Refresh now, and clear the “new” markers"
+          >
             <RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
           </button>
         </div>
@@ -515,6 +539,7 @@ export function InternshipTracker() {
         {grouped.map(([company, list]) => {
           const open = expanded[company] ?? false;
           const active = list.filter((j) => j.stage !== "not_applied").length;
+          const fresh = list.filter((j) => j.firstSeen > seenAt).length;
           const newest = Math.max(...list.map((j) => j.postedAt ?? j.firstSeen));
           const best = list.reduce<number | null>((m, j) => (j.score != null && (m == null || j.score > m) ? j.score : m), null);
           return (
@@ -537,6 +562,18 @@ export function InternshipTracker() {
                 <span className="tnum rounded border border-[var(--border)] px-1.5 py-px text-[11px] text-[var(--muted)]">
                   {list.length}
                 </span>
+                {/* Visible while collapsed, so you can tell at a glance which
+                    companies posted something since you last looked. */}
+                {fresh > 0 && (
+                  <span
+                    className="tnum inline-flex items-center gap-1 rounded px-1.5 py-px text-[11px] font-semibold"
+                    style={{ background: "color-mix(in srgb, var(--good) 18%, transparent)", color: "var(--good)" }}
+                    title={`${fresh} role${fresh === 1 ? "" : "s"} detected since your last refresh`}
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--good)" }} />
+                    {fresh} new
+                  </span>
+                )}
                 {active > 0 && (
                   <span className="tnum rounded px-1.5 py-px text-[11px]" style={{ background: stageTint("applied", 18), color: STAGE_COLOR.applied }}>
                     {active} in progress

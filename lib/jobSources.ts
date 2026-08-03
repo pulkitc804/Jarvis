@@ -109,6 +109,19 @@ export const BOARDS: Board[] = [
   { company: "Gusto", ats: "greenhouse", slug: "gusto" },
   { company: "Flexport", ats: "greenhouse", slug: "flexport" },
   { company: "Nuro", ats: "greenhouse", slug: "nuro" },
+  { company: "MongoDB", ats: "greenhouse", slug: "mongodb" },
+  { company: "Elastic", ats: "greenhouse", slug: "elastic" },
+  { company: "Scale AI", ats: "greenhouse", slug: "scaleai" },
+  { company: "Verkada", ats: "greenhouse", slug: "verkada" },
+  { company: "Grafana Labs", ats: "greenhouse", slug: "grafanalabs" },
+  { company: "Vercel", ats: "greenhouse", slug: "vercel" },
+  { company: "Dropbox", ats: "greenhouse", slug: "dropbox" },
+  { company: "SoFi", ats: "greenhouse", slug: "sofi" },
+  { company: "Peloton", ats: "greenhouse", slug: "peloton" },
+  { company: "Marqeta", ats: "greenhouse", slug: "marqeta" },
+  { company: "Betterment", ats: "greenhouse", slug: "betterment" },
+  { company: "Cockroach Labs", ats: "greenhouse", slug: "cockroachlabs" },
+  { company: "Squarespace", ats: "greenhouse", slug: "squarespace" },
   // Lever
   { company: "Palantir", ats: "lever", slug: "palantir" },
   { company: "Spotify", ats: "lever", slug: "spotify" },
@@ -124,6 +137,12 @@ export const BOARDS: Board[] = [
   { company: "Harvey", ats: "ashby", slug: "harvey" },
   { company: "Mercor", ats: "ashby", slug: "mercor" },
   { company: "Modal", ats: "ashby", slug: "modal" },
+  { company: "Perplexity", ats: "ashby", slug: "perplexity" },
+  { company: "ElevenLabs", ats: "ashby", slug: "elevenlabs" },
+  { company: "Replit", ats: "ashby", slug: "replit" },
+  { company: "Vanta", ats: "ashby", slug: "vanta" },
+  { company: "Decagon", ats: "ashby", slug: "decagon" },
+  { company: "Abridge", ats: "ashby", slug: "abridge" },
   // Workday
   { company: "Nvidia", ats: "workday", host: "nvidia.wd5.myworkdayjobs.com", tenant: "nvidia", site: "NVIDIAExternalCareerSite" },
   { company: "Salesforce", ats: "workday", host: "salesforce.wd12.myworkdayjobs.com", tenant: "salesforce", site: "External_Career_Site" },
@@ -243,8 +262,9 @@ async function fetchBoard(b: Board): Promise<DetectedJob[]> {
 }
 
 export async function fetchAllBoards(): Promise<DetectedJob[]> {
-  // 8 in flight keeps ~40 boards under ~5s without hammering any one host.
-  const results = await pool(BOARDS, 8, (b) => fetchBoard(b).catch(() => []));
+  // 10 in flight. Higher throttles: the ATS CDNs start refusing connections
+  // somewhere past a dozen concurrent requests, which reads as "board dead".
+  const results = await pool(BOARDS, 10, (b) => fetchBoard(b).catch(() => []));
   return results.filter(Boolean).flat();
 }
 
