@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isUndergradRole } from "./internships";
-import { fetchEverything, type DetectedJob, type SourceReport } from "./jobSources";
+import { BOARD_COUNT, fetchEverything, type DetectedJob, type SourceReport } from "./jobSources";
+import { cachedUrlCount } from "./scraperCore";
 
 /**
  * FREE, fast job detection. Jarvis's own server polls every source in
@@ -17,7 +18,17 @@ const STATE_FILE = path.join(DATA_DIR, "fetcher-state.json");
 export type { DetectedJob };
 
 /** Rank sources by how close they are to the employer, best first. */
-const SOURCE_RANK: Record<string, number> = { greenhouse: 0, lever: 0, ashby: 0, tracker: 1, reddit: 2, hackernews: 3 };
+const SOURCE_RANK: Record<string, number> = {
+  greenhouse: 0,
+  lever: 0,
+  ashby: 0,
+  workday: 0,
+  amazon: 0,
+  tracker: 1,
+  indeed: 2,
+  reddit: 3,
+  hackernews: 4,
+};
 function better(a: DetectedJob, b: DetectedJob): DetectedJob {
   const ra = SOURCE_RANK[a.source || ""] ?? 9;
   const rb = SOURCE_RANK[b.source || ""] ?? 9;
@@ -50,9 +61,17 @@ export function getDetectedJobs(): DetectedJob[] {
   return readJson<DetectedJob[]>(DETECTED_FILE, []);
 }
 
-export type FetcherState = { lastRunAt: string | null; lastAdded: number; report: SourceReport[] };
+export type FetcherState = {
+  lastRunAt: string | null;
+  lastAdded: number;
+  report: SourceReport[];
+  /** Employer boards watched directly, and total roles scanned last pass. */
+  boardCount?: number;
+  scanned?: number;
+  ms?: number;
+};
 export function getFetcherState(): FetcherState {
-  return readJson<FetcherState>(STATE_FILE, { lastRunAt: null, lastAdded: 0, report: [] });
+  return readJson<FetcherState>(STATE_FILE, { lastRunAt: null, lastAdded: 0, report: [], boardCount: BOARD_COUNT });
 }
 
 let running = false;
@@ -61,6 +80,7 @@ let started = false;
 export async function refreshDetected(): Promise<number> {
   if (running) return 0;
   running = true;
+  const startedAt = Date.now();
   try {
     const { jobs, report } = await fetchEverything();
 
@@ -92,7 +112,15 @@ export async function refreshDetected(): Promise<number> {
     }
 
     if (added > 0 || pruned > 0 || enriched > 0) writeJsonAtomic(DETECTED_FILE, [...byKey.values()]);
-    writeJsonAtomic(STATE_FILE, { lastRunAt: nowIso(), lastAdded: added, report } satisfies FetcherState);
+    writeJsonAtomic(STATE_FILE, {
+      lastRunAt: nowIso(),
+      lastAdded: added,
+      report,
+      boardCount: BOARD_COUNT,
+      scanned: jobs.length,
+      ms: Date.now() - startedAt,
+    } satisfies FetcherState);
+    void cachedUrlCount(); // keeps the conditional-GET cache referenced
     return added;
   } finally {
     running = false;

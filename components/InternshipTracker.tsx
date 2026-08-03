@@ -65,7 +65,14 @@ type Resp = {
   upcomingDeadlines: Array<{ id: string; company: string; role: string; deadlineAt: number; deadlineLabel: string | null }>;
   scraperConnected: boolean;
   detectedCount: number;
-  fetcher?: { lastRunAt: string | null; lastAdded: number; report: Array<{ source: string; found: number; ok: boolean }> };
+  fetcher?: {
+    lastRunAt: string | null;
+    lastAdded: number;
+    report: Array<{ source: string; found: number; ok: boolean; ms?: number }>;
+    boardCount?: number;
+    scanned?: number;
+    ms?: number;
+  };
   aiConfigured: boolean;
   tailoringInstant: boolean; // true = API key set (instant); false = queued to scraper
   pdfAvailable: boolean;
@@ -104,14 +111,19 @@ const SOURCE_LABEL: Record<string, string> = {
   greenhouse: "Greenhouse",
   lever: "Lever",
   ashby: "Ashby",
+  workday: "Workday",
+  amazon: "Amazon Jobs",
   tracker: "GitHub tracker",
   reddit: "Reddit",
   hackernews: "Hacker News",
   indeed: "Indeed",
 };
-// Feed groups reported by the background fetcher.
+/** Sources that are the employer's own board — the earliest possible signal. */
+const DIRECT_SOURCES = ["greenhouse", "lever", "ashby", "workday", "amazon"];
+// Feed families reported by the background fetcher.
 const SOURCE_GROUP: Record<string, string> = {
-  ats: "Company boards",
+  boards: "Employer boards",
+  ats: "Employer boards",
   trackers: "GitHub trackers",
   reddit: "Reddit",
   hackernews: "Hacker News",
@@ -314,7 +326,7 @@ export function InternshipTracker() {
         <div className="panel mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 px-3.5 py-2.5 text-[12px]">
           <span className="inline-flex items-center gap-2 text-[var(--text)]">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--good)]" />
-            Watching {data.fetcher.report.length || 4} feeds
+            Watching {data.fetcher.boardCount ?? 0} employer boards
           </span>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[var(--muted)]">
             {data.fetcher.report.map((r) => (
@@ -325,6 +337,9 @@ export function InternshipTracker() {
             ))}
           </span>
           <span className="ml-auto text-[var(--faint)]">
+            {data.fetcher.scanned != null && `${data.fetcher.scanned} matches scanned`}
+            {data.fetcher.ms != null && ` in ${(data.fetcher.ms / 1000).toFixed(1)}s`}
+            {" · "}
             {data.fetcher.lastRunAt ? `checked ${relAge(Date.parse(data.fetcher.lastRunAt))}` : "starting…"}
             {data.fetcher.lastAdded > 0 && ` · +${data.fetcher.lastAdded} new`}
           </span>
@@ -390,8 +405,9 @@ export function InternshipTracker() {
                 {j.source && (
                   <span
                     className="rounded border border-[var(--border)] px-1.5 py-px text-[10px] text-[var(--faint)]"
+                    style={DIRECT_SOURCES.includes(j.source) ? { color: "var(--accent)", borderColor: "color-mix(in srgb, var(--accent) 35%, transparent)" } : undefined}
                     title={
-                      ["greenhouse", "lever", "ashby"].includes(j.source)
+                      DIRECT_SOURCES.includes(j.source)
                         ? "Straight from the company's own job board — the earliest possible signal"
                         : "Found via a secondary feed"
                     }

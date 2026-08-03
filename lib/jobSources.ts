@@ -1,16 +1,18 @@
 import { isBigTech, isUndergradRole } from "./internships";
+import { getJson, pool, postJson, request } from "./scraperCore";
 
 /**
- * Live job-posting sources, in rough order of how early they see a role:
+ * Live job-posting sources, ordered by how early they see a role:
  *
- *  1. ATS boards (Greenhouse / Lever / Ashby) — the ORIGIN. A posting exists
- *     here the moment recruiting publishes it, hours-to-days before any
- *     community tracker picks it up, and each carries a real publish timestamp.
- *  2. Community GitHub trackers — broad coverage, but second-hand and batched.
- *  3. Reddit — where students often post a role minutes after it drops.
+ *  1. Employer job boards (Greenhouse / Lever / Ashby / Workday / Amazon) — the
+ *     ORIGIN. A posting exists here the moment recruiting publishes it, hours to
+ *     days before any community tracker mirrors it, and most carry a real
+ *     publish timestamp.
+ *  2. Community GitHub trackers — broad, but second-hand and batched.
+ *  3. Reddit / Hacker News — occasionally the fastest human signal, but only
+ *     counted when a post carries a genuine apply link (see parseRedditRss).
  *
- * All of it is plain HTTP against public endpoints: no API keys, no Claude
- * tokens, nothing charged against the subscription.
+ * Everything is public HTTP: no API keys, no Claude tokens, nothing billed.
  */
 
 export type DetectedJob = {
@@ -18,56 +20,30 @@ export type DetectedJob = {
   role: string;
   url: string;
   location?: string;
-  /** When the employer published it (ISO). Absent when a source doesn't say. */
+  /** Employer's publish time (ISO) when the source reports one. */
   postedAt?: string;
-  /** When Jarvis first saw it (ISO) — always set on write. */
+  /** When Jarvis first saw it (ISO) — set on write. */
   firstSeen?: string;
   source?: string;
 };
 
-const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36";
-
-async function getText(url: string, ms = 15000): Promise<string | null> {
-  try {
-    const c = new AbortController();
-    const t = setTimeout(() => c.abort(), ms);
-    const res = await fetch(url, { signal: c.signal, headers: { "user-agent": UA, accept: "*/*" } }).finally(() =>
-      clearTimeout(t),
-    );
-    return res.ok ? await res.text() : null;
-  } catch {
-    return null;
-  }
-}
-async function getJson<T>(url: string, ms = 15000): Promise<T | null> {
-  const txt = await getText(url, ms);
-  if (!txt) return null;
-  try {
-    return JSON.parse(txt) as T;
-  } catch {
-    return null;
-  }
-}
-
 /* ------------------------------------------------------------------ filters */
 
-// Word-boundary "intern" — plain /intern/ also matches "International".
-const INTERN_RE = /\bintern(ship|s)?\b|\bco-?op\b|\bstudent researcher\b|\buniversity (grad|program)\b|\bnew grad\b/i;
+// Word-boundary "intern": plain /intern/ also matches "International".
+const INTERN_RE = /\bintern(ship|s)?\b|\bco-?op\b|\bstudent researcher\b|\bnew grad\b|\buniversity grad\b/i;
 const TECH_RE =
-  /software engineer|software dev|\bswe\b|\bsde\b|machine learning|\bml\b|\bai\b|data scien|data eng|applied scien|research (engineer|scientist|intern)|full.?stack|back.?end|front.?end|infrastructure|platform|computer vision|\bnlp\b|deep learning/i;
-// Roles for a *future* summer. Anything explicitly tied to an older cycle is stale.
+  /software engineer|software dev|\bswe\b|\bsde\b|machine learning|\bml\b|\bai\b|data scien|data eng|applied scien|research (engineer|scientist|intern)|full.?stack|back.?end|front.?end|infrastructure|platform|computer vision|\bnlp\b|deep learning|security engineer|systems engineer/i;
 const TARGET_YEAR_RE = /\b2027\b/;
-const STALE_YEAR_RE = /\b(2020|2021|2022|2023|2024|2025|2026)\b/;
+const STALE_YEAR_RE = /\b(2019|2020|2021|2022|2023|2024|2025|2026)\b/;
 
-/** Keep only undergrad-eligible tech internships for the target cycle. */
+/** Undergrad-eligible tech internship for the target cycle. */
 export function isTargetRole(title: string): boolean {
   if (!title) return false;
   if (!INTERN_RE.test(title)) return false;
   if (!TECH_RE.test(title)) return false;
   if (!isUndergradRole(title)) return false;
-  // Explicitly 2027 wins; otherwise accept undated titles but reject old cycles.
-  if (TARGET_YEAR_RE.test(title)) return true;
-  return !STALE_YEAR_RE.test(title);
+  if (TARGET_YEAR_RE.test(title)) return true; // explicit 2027 always wins
+  return !STALE_YEAR_RE.test(title); // undated is fine; an older cycle is not
 }
 
 function cleanUrl(u: string): string {
@@ -82,51 +58,102 @@ function stripTags(s: string): string {
     .replace(/&amp;/g, "&")
     .replace(/&#39;|&apos;/g, "'")
     .replace(/&quot;/g, '"')
+    .replace(/&nbsp;/g, " ")
     .replace(/\*\*/g, "")
-    // Trackers decorate titles with status emoji (⏳ 🛂 🇺🇸 …) — strip them all.
+    // trackers decorate titles with status emoji (⏳ 🛂 🇺🇸 …)
     .replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/* ------------------------------------------------------------- 1. ATS boards */
+function iso(d: Date | number | string | undefined | null): string | undefined {
+  if (d == null) return undefined;
+  const t = new Date(d).getTime();
+  return Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+}
 
-type Ats = { company: string; slug: string; ats: "greenhouse" | "lever" | "ashby" };
+/* ------------------------------------------------------- 1. employer boards */
 
-// Curated, all verified to return live JSON. These are the origin of postings —
-// add a company here and Jarvis sees its roles the hour they go up.
-export const ATS_BOARDS: Ats[] = [
-  { company: "Databricks", slug: "databricks", ats: "greenhouse" },
-  { company: "Stripe", slug: "stripe", ats: "greenhouse" },
-  { company: "Figma", slug: "figma", ats: "greenhouse" },
-  { company: "Anthropic", slug: "anthropic", ats: "greenhouse" },
-  { company: "Robinhood", slug: "robinhood", ats: "greenhouse" },
-  { company: "Coinbase", slug: "coinbase", ats: "greenhouse" },
-  { company: "Discord", slug: "discord", ats: "greenhouse" },
-  { company: "Reddit", slug: "reddit", ats: "greenhouse" },
-  { company: "Instacart", slug: "instacart", ats: "greenhouse" },
-  { company: "Palantir", slug: "palantir", ats: "lever" },
-  { company: "OpenAI", slug: "openai", ats: "ashby" },
-  { company: "Notion", slug: "notion", ats: "ashby" },
+export type Board =
+  | { company: string; ats: "greenhouse" | "lever" | "ashby"; slug: string }
+  | { company: string; ats: "workday"; host: string; tenant: string; site: string }
+  | { company: string; ats: "amazon" };
+
+/**
+ * Every entry below was probed live and confirmed to return postings. Adding a
+ * company here is all it takes for Jarvis to watch its board directly.
+ */
+export const BOARDS: Board[] = [
+  // Greenhouse
+  { company: "Databricks", ats: "greenhouse", slug: "databricks" },
+  { company: "Stripe", ats: "greenhouse", slug: "stripe" },
+  { company: "Figma", ats: "greenhouse", slug: "figma" },
+  { company: "Anthropic", ats: "greenhouse", slug: "anthropic" },
+  { company: "Robinhood", ats: "greenhouse", slug: "robinhood" },
+  { company: "Coinbase", ats: "greenhouse", slug: "coinbase" },
+  { company: "Discord", ats: "greenhouse", slug: "discord" },
+  { company: "Reddit", ats: "greenhouse", slug: "reddit" },
+  { company: "Instacart", ats: "greenhouse", slug: "instacart" },
+  { company: "Airbnb", ats: "greenhouse", slug: "airbnb" },
+  { company: "Pinterest", ats: "greenhouse", slug: "pinterest" },
+  { company: "Lyft", ats: "greenhouse", slug: "lyft" },
+  { company: "Cloudflare", ats: "greenhouse", slug: "cloudflare" },
+  { company: "Datadog", ats: "greenhouse", slug: "datadog" },
+  { company: "Roblox", ats: "greenhouse", slug: "roblox" },
+  { company: "GitLab", ats: "greenhouse", slug: "gitlab" },
+  { company: "Asana", ats: "greenhouse", slug: "asana" },
+  { company: "Samsara", ats: "greenhouse", slug: "samsara" },
+  { company: "Affirm", ats: "greenhouse", slug: "affirm" },
+  { company: "Brex", ats: "greenhouse", slug: "brex" },
+  { company: "Chime", ats: "greenhouse", slug: "chime" },
+  { company: "Gusto", ats: "greenhouse", slug: "gusto" },
+  { company: "Flexport", ats: "greenhouse", slug: "flexport" },
+  { company: "Nuro", ats: "greenhouse", slug: "nuro" },
+  // Lever
+  { company: "Palantir", ats: "lever", slug: "palantir" },
+  { company: "Spotify", ats: "lever", slug: "spotify" },
+  { company: "Zoox", ats: "lever", slug: "zoox" },
+  { company: "Match Group", ats: "lever", slug: "matchgroup" },
+  // Ashby
+  { company: "OpenAI", ats: "ashby", slug: "openai" },
+  { company: "Notion", ats: "ashby", slug: "notion" },
+  { company: "Ramp", ats: "ashby", slug: "ramp" },
+  { company: "Cursor", ats: "ashby", slug: "cursor" },
+  { company: "Linear", ats: "ashby", slug: "linear" },
+  { company: "Sierra", ats: "ashby", slug: "sierra" },
+  { company: "Harvey", ats: "ashby", slug: "harvey" },
+  { company: "Mercor", ats: "ashby", slug: "mercor" },
+  { company: "Modal", ats: "ashby", slug: "modal" },
+  // Workday
+  { company: "Nvidia", ats: "workday", host: "nvidia.wd5.myworkdayjobs.com", tenant: "nvidia", site: "NVIDIAExternalCareerSite" },
+  { company: "Salesforce", ats: "workday", host: "salesforce.wd12.myworkdayjobs.com", tenant: "salesforce", site: "External_Career_Site" },
+  { company: "Adobe", ats: "workday", host: "adobe.wd5.myworkdayjobs.com", tenant: "adobe", site: "external_experienced" },
+  // Bespoke
+  { company: "Amazon", ats: "amazon" },
 ];
 
-type GhJob = {
-  title: string;
-  absolute_url: string;
-  updated_at?: string;
-  first_published?: string;
-  location?: { name?: string };
-};
-type LeverJob = {
-  text: string;
-  hostedUrl: string;
-  createdAt?: number;
-  categories?: { location?: string };
-};
+type GhJob = { title: string; absolute_url: string; updated_at?: string; first_published?: string; location?: { name?: string } };
+type LeverJob = { text: string; hostedUrl: string; createdAt?: number; categories?: { location?: string } };
 type AshbyJob = { title: string; jobUrl: string; publishedAt?: string; location?: string; isListed?: boolean };
+type WorkdayJob = { title: string; externalPath: string; locationsText?: string; postedOn?: string };
+type AmazonJob = { title: string; job_path: string; posted_date?: string; city?: string; state?: string };
 
-async function fetchAtsBoard(b: Ats): Promise<DetectedJob[]> {
+/** Workday reports "Posted 5 Days Ago" / "Posted Today" — approximate it. */
+function parseWorkdayPosted(s: string | undefined): string | undefined {
+  if (!s) return undefined;
+  const now = Date.now();
+  if (/today/i.test(s)) return iso(now);
+  if (/yesterday/i.test(s)) return iso(now - 864e5);
+  const m = s.match(/(\d+)\+?\s*day/i);
+  if (m) return iso(now - Number(m[1]) * 864e5);
+  const mo = s.match(/(\d+)\+?\s*month/i);
+  if (mo) return iso(now - Number(mo[1]) * 30 * 864e5);
+  return undefined;
+}
+
+async function fetchBoard(b: Board): Promise<DetectedJob[]> {
   const out: DetectedJob[] = [];
+
   if (b.ats === "greenhouse") {
     const d = await getJson<{ jobs?: GhJob[] }>(`https://boards-api.greenhouse.io/v1/boards/${b.slug}/jobs`);
     for (const j of d?.jobs || []) {
@@ -136,7 +163,7 @@ async function fetchAtsBoard(b: Ats): Promise<DetectedJob[]> {
         role: stripTags(j.title),
         url: cleanUrl(j.absolute_url),
         location: j.location?.name,
-        postedAt: j.first_published || j.updated_at,
+        postedAt: iso(j.first_published || j.updated_at),
         source: "greenhouse",
       });
     }
@@ -149,11 +176,11 @@ async function fetchAtsBoard(b: Ats): Promise<DetectedJob[]> {
         role: stripTags(j.text),
         url: cleanUrl(j.hostedUrl),
         location: j.categories?.location,
-        postedAt: j.createdAt ? new Date(j.createdAt).toISOString() : undefined,
+        postedAt: iso(j.createdAt),
         source: "lever",
       });
     }
-  } else {
+  } else if (b.ats === "ashby") {
     const d = await getJson<{ jobs?: AshbyJob[] }>(`https://api.ashbyhq.com/posting-api/job-board/${b.slug}`);
     for (const j of d?.jobs || []) {
       if (j.isListed === false) continue;
@@ -163,20 +190,65 @@ async function fetchAtsBoard(b: Ats): Promise<DetectedJob[]> {
         role: stripTags(j.title),
         url: cleanUrl(j.jobUrl),
         location: j.location,
-        postedAt: j.publishedAt,
+        postedAt: iso(j.publishedAt),
         source: "ashby",
       });
     }
+  } else if (b.ats === "workday") {
+    // Workday filters server-side, so ask it for interns instead of pulling
+    // the whole board (these tenants carry 900+ postings each).
+    for (const q of ["intern 2027", "internship"]) {
+      const d = await postJson<{ jobPostings?: WorkdayJob[] }>(`https://${b.host}/wday/cxs/${b.tenant}/${b.site}/jobs`, {
+        appliedFacets: {},
+        limit: 20,
+        offset: 0,
+        searchText: q,
+      });
+      for (const j of d?.jobPostings || []) {
+        if (!isTargetRole(j.title)) continue;
+        out.push({
+          company: b.company,
+          role: stripTags(j.title),
+          url: `https://${b.host}/en-US/${b.site}${j.externalPath}`,
+          location: j.locationsText,
+          postedAt: parseWorkdayPosted(j.postedOn),
+          source: "workday",
+        });
+      }
+    }
+  } else {
+    // Note the /en/ path — the bare /search.json 302s there. Keep the queries
+    // broad and let isTargetRole do the filtering: adding "2027" to the query
+    // itself makes Amazon's search return nothing.
+    const queries = ["software+engineer+intern", "software+development+engineer+intern", "data+scientist+intern", "machine+learning+intern"];
+    const pages = await pool(queries, 2, (q) =>
+      getJson<{ jobs?: AmazonJob[] }>(`https://www.amazon.jobs/en/search.json?base_query=${q}&result_limit=100`),
+    );
+    for (const d of pages) {
+      for (const j of d?.jobs || []) {
+        if (!isTargetRole(j.title)) continue;
+        out.push({
+          company: "Amazon",
+          role: stripTags(j.title),
+          url: `https://www.amazon.jobs${j.job_path}`,
+          location: [j.city, j.state].filter(Boolean).join(", ") || undefined,
+          postedAt: iso(j.posted_date),
+          source: "amazon",
+        });
+      }
+    }
   }
+
   return out;
 }
 
-export async function fetchAllAts(): Promise<DetectedJob[]> {
-  const results = await Promise.all(ATS_BOARDS.map((b) => fetchAtsBoard(b).catch(() => [])));
-  return results.flat();
+export async function fetchAllBoards(): Promise<DetectedJob[]> {
+  // 8 in flight keeps ~40 boards under ~5s without hammering any one host.
+  const results = await pool(BOARDS, 8, (b) => fetchBoard(b).catch(() => []));
+  return results.filter(Boolean).flat();
 }
 
-/* ------------------------------------------------- 2. Community GitHub trackers */
+/* ------------------------------------------- 2. community GitHub trackers */
 
 export const TRACKERS = [
   "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/README.md",
@@ -190,6 +262,7 @@ export const TRACKERS = [
   "https://raw.githubusercontent.com/speedyapply/2026-SWE-College-Jobs/main/INTERN.md",
   "https://raw.githubusercontent.com/speedyapply/2026-AI-College-Jobs/main/INTERN.md",
   "https://raw.githubusercontent.com/coderQuad/New-Grad-Positions/main/README.md",
+  "https://raw.githubusercontent.com/ReaVNaiL/New-Grad-2024/main/README.md",
 ];
 
 function parseTrackerTable(md: string): DetectedJob[] {
@@ -206,8 +279,8 @@ function parseTrackerTable(md: string): DetectedJob[] {
     else lastCompany = company;
     if (!company) continue;
     const role = stripTags(roleRaw);
-    // Tracker tables are already internship-scoped, so require the tech/undergrad
-    // filters but not the literal word "intern" in every title.
+    // These tables are already internship-scoped, so don't demand the literal
+    // word "intern" in every row — but the rest of the filters still apply.
     if (!TECH_RE.test(role) || !isUndergradRole(role)) continue;
     if (STALE_YEAR_RE.test(role) && !TARGET_YEAR_RE.test(role)) continue;
     const href = applyRaw.match(/href="([^"]+)"/) || applyRaw.match(/\((https?:\/\/[^)]+)\)/);
@@ -219,18 +292,20 @@ function parseTrackerTable(md: string): DetectedJob[] {
 }
 
 export async function fetchAllTrackers(): Promise<DetectedJob[]> {
-  const pages = await Promise.all(TRACKERS.map((u) => getText(u).catch(() => null)));
+  const pages = await pool(TRACKERS, 6, async (u) => (await request(u)).body);
   return pages.filter(Boolean).flatMap((md) => parseTrackerTable(md as string));
 }
 
-/* ---------------------------------------------------------------- 3. Reddit */
+/* ---------------------------------------------------------------- 3. social */
 
-// Reddit blocks its JSON API for non-browser clients, but the RSS feeds stay
-// open. Students frequently post a role within minutes of it going live.
-const SUBREDDITS = ["csMajors", "internships", "cscareerquestions"];
+const SUBREDDITS = ["csMajors", "internships", "cscareerquestions", "developersIndia"];
 
-/** Apply links students paste into posts — the ones worth following. */
-const APPLY_HOST_RE = /https?:\/\/(?:[\w.-]*\.)?(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|jobs\.apple\.com|amazon\.jobs|careers\.google\.com|metacareers\.com|smartrecruiters\.com|icims\.com)\/[^\s"'<>&]+/i;
+const APPLY_HOST_RE =
+  /https?:\/\/(?:[\w.-]*\.)?(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|jobs\.apple\.com|amazon\.jobs|careers\.google\.com|metacareers\.com|smartrecruiters\.com|icims\.com|workable\.com)\/[^\s"'<>&)]+/i;
+
+/** Titles that ask about a role rather than announce one. */
+const QUESTION_RE =
+  /\?|\bhas anyone\b|\banyone (else|get|got|hear|know|receive)\b|\bhow do i\b|\bshould i\b|\bwhat (are|is|do)\b|\bdid (you|anyone)\b|\bam i\b|\bis it\b|\bhelp\b|\badvice\b|\brant\b|\bchances\b|\bresume review\b/i;
 
 function decodeEntities(s: string): string {
   return s
@@ -241,47 +316,39 @@ function decodeEntities(s: string): string {
     .replace(/&amp;/g, "&");
 }
 
-// Most subreddit posts are questions ("anyone heard back after the OA?"), not
-// openings. Requiring a real ATS apply link in the body is what separates a
-// genuine "this just dropped" post from chatter — precision over volume, since
-// these land in the same ledger as the employer feeds.
+/**
+ * Most subreddit posts are questions, not openings. Requiring a real ATS apply
+ * link is what separates "this just dropped" from chatter — these land in the
+ * same ledger as employer feeds, so precision matters more than volume here.
+ */
 function parseRedditRss(xml: string): DetectedJob[] {
   const out: DetectedJob[] = [];
-  const entries = xml.split("<entry>").slice(1);
-  for (const e of entries) {
+  for (const e of xml.split("<entry>").slice(1)) {
     const title = stripTags(decodeEntities(e.match(/<title>([\s\S]*?)<\/title>/)?.[1] || ""));
-    if (!title || !isTargetRole(title)) continue;
-    if (QUESTION_RE.test(title)) continue; // discussion, not a posting
-
+    if (!title || !isTargetRole(title) || QUESTION_RE.test(title)) continue;
     const content = decodeEntities(e.match(/<content[^>]*>([\s\S]*?)<\/content>/)?.[1] || "");
     const applyLink = content.match(APPLY_HOST_RE)?.[0];
-    if (!applyLink) continue; // no apply link → not an actionable posting
-
+    if (!applyLink) continue;
     const company = guessCompany(`${title} ${applyLink}`);
     if (!company) continue;
-
     out.push({
       company,
       role: title.slice(0, 160),
       url: cleanUrl(applyLink),
-      postedAt: e.match(/<published>([^<]+)<\/published>/)?.[1],
+      postedAt: iso(e.match(/<published>([^<]+)<\/published>/)?.[1]),
       source: "reddit",
     });
   }
   return out;
 }
 
-/** Titles that are asking about a role rather than announcing one. */
-const QUESTION_RE =
-  /\?|\bhas anyone\b|\banyone (else|get|got|hear|know|receive)\b|\bhow do i\b|\bshould i\b|\bwhat (are|is|do)\b|\bdid (you|anyone)\b|\bam i\b|\bis it\b|\bhelp\b|\badvice\b|\brant\b|\bchances\b|\bresume review\b/i;
-
-/** Pull a known big-tech name out of free text (Reddit titles, HN comments). */
 const KNOWN_COMPANIES = [
   "Google", "Amazon", "Apple", "Microsoft", "Meta", "Nvidia", "Netflix", "Tesla", "Adobe",
   "Salesforce", "Uber", "Lyft", "Airbnb", "Databricks", "Stripe", "OpenAI", "Anthropic",
   "Palantir", "Snowflake", "TikTok", "ByteDance", "LinkedIn", "Coinbase", "Capital One",
   "Bloomberg", "Snap", "Pinterest", "DoorDash", "Roblox", "Figma", "Notion", "Datadog",
   "Cloudflare", "Reddit", "Discord", "Robinhood", "Instacart", "Intel", "Qualcomm", "IBM",
+  "Spotify", "Zoox", "Ramp", "Cursor", "Asana", "GitLab", "Affirm", "Brex", "Samsara",
 ];
 export function guessCompany(text: string): string | null {
   for (const c of KNOWN_COMPANIES) {
@@ -291,68 +358,69 @@ export function guessCompany(text: string): string | null {
 }
 
 export async function fetchReddit(): Promise<DetectedJob[]> {
-  const out: DetectedJob[] = [];
-  // Sequential with a short gap: Reddit 429s concurrent hits from one IP.
-  for (const s of SUBREDDITS) {
-    const xml = await getText(`https://www.reddit.com/r/${s}/new.rss?limit=50`).catch(() => null);
-    if (xml) out.push(...parseRedditRss(xml));
-    await new Promise((r) => setTimeout(r, 1200));
-  }
-  return out;
+  // scraperCore serialises reddit.com and spaces the requests, so this is safe.
+  const feeds = await pool(SUBREDDITS, 4, async (s) => (await request(`https://www.reddit.com/r/${s}/new.rss?limit=50`)).body);
+  return feeds.filter(Boolean).flatMap((x) => parseRedditRss(x as string));
 }
 
-/* ------------------------------------------------------ 4. Hacker News search */
+type HnHit = { objectID: string; comment_text?: string; created_at?: string };
 
-type HnHit = { objectID: string; comment_text?: string; story_title?: string; created_at?: string };
-
-/** HN "Who is hiring" comments and story text, searched newest-first. */
 export async function fetchHackerNews(): Promise<DetectedJob[]> {
-  const d = await getJson<{ hits?: HnHit[] }>(
-    "https://hn.algolia.com/api/v1/search_by_date?query=%222027%22%20intern&tags=comment&hitsPerPage=50",
-  );
   const out: DetectedJob[] = [];
-  for (const h of d?.hits || []) {
-    const text = stripTags(decodeEntities(h.comment_text || ""));
-    if (!text || !isTargetRole(text)) continue;
-    // Same rule as Reddit: an apply link is what makes it a posting, not a chat.
-    const link = text.match(APPLY_HOST_RE)?.[0];
-    if (!link) continue;
-    const company = guessCompany(`${text.slice(0, 300)} ${link}`);
-    if (!company) continue;
-    out.push({
-      company,
-      role: text.replace(/\s+/g, " ").slice(0, 120),
-      url: cleanUrl(link),
-      postedAt: h.created_at,
-      source: "hackernews",
-    });
+  const queries = ["%222027%22%20intern", "intern%202027%20apply"];
+  const pages = await pool(queries, 2, (q) =>
+    getJson<{ hits?: HnHit[] }>(`https://hn.algolia.com/api/v1/search_by_date?query=${q}&tags=comment&hitsPerPage=50`),
+  );
+  for (const d of pages) {
+    for (const h of d?.hits || []) {
+      const text = stripTags(decodeEntities(h.comment_text || ""));
+      if (!text || !isTargetRole(text)) continue;
+      const link = text.match(APPLY_HOST_RE)?.[0];
+      if (!link) continue; // same rule as Reddit
+      const company = guessCompany(`${text.slice(0, 300)} ${link}`);
+      if (!company) continue;
+      out.push({
+        company,
+        role: text.replace(/\s+/g, " ").slice(0, 120),
+        url: cleanUrl(link),
+        postedAt: iso(h.created_at),
+        source: "hackernews",
+      });
+    }
   }
   return out;
 }
 
 /* --------------------------------------------------------------- aggregate */
 
-export type SourceReport = { source: string; found: number; ok: boolean };
+export type SourceReport = { source: string; found: number; ok: boolean; ms: number };
 
-/** Run every source concurrently; one failing source never blocks the rest. */
+/** Run every family concurrently; a failing family never blocks the others. */
 export async function fetchEverything(): Promise<{ jobs: DetectedJob[]; report: SourceReport[] }> {
-  const tasks: Array<[string, Promise<DetectedJob[]>]> = [
-    ["ats", fetchAllAts()],
-    ["trackers", fetchAllTrackers()],
-    ["reddit", fetchReddit()],
-    ["hackernews", fetchHackerNews()],
+  const families: Array<[string, () => Promise<DetectedJob[]>]> = [
+    ["boards", fetchAllBoards],
+    ["trackers", fetchAllTrackers],
+    ["reddit", fetchReddit],
+    ["hackernews", fetchHackerNews],
   ];
+
   const settled = await Promise.all(
-    tasks.map(async ([name, p]) => {
+    families.map(async ([name, run]) => {
+      const t0 = Date.now();
       try {
-        return { name, jobs: await p, ok: true };
+        const jobs = await run();
+        return { name, jobs, ok: true, ms: Date.now() - t0 };
       } catch {
-        return { name, jobs: [] as DetectedJob[], ok: false };
+        return { name, jobs: [] as DetectedJob[], ok: false, ms: Date.now() - t0 };
       }
     }),
   );
+
   return {
     jobs: settled.flatMap((s) => s.jobs),
-    report: settled.map((s) => ({ source: s.name, found: s.jobs.length, ok: s.ok })),
+    report: settled.map((s) => ({ source: s.name, found: s.jobs.length, ok: s.ok, ms: s.ms })),
   };
 }
+
+/** How many employer boards are being watched — surfaced in the UI. */
+export const BOARD_COUNT = BOARDS.length;
