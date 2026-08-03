@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { getDetectedJobs } from "./internshipFetcher";
+import { readManualJobs } from "./manualJobs";
+import { getLinkHealth, type LinkVerdict } from "./linkHealth";
 
 /**
  * Internship tracker data layer.
@@ -73,6 +75,10 @@ type ScraperJob = {
   postedAt?: string;
   /** Which feed surfaced it: greenhouse | lever | ashby | tracker | reddit | … */
   source?: string;
+  /** Set for hand-entered roles (see lib/manualJobs.ts). */
+  manual?: boolean;
+  via?: string;
+  manualId?: string;
   // Optional AI fields the scraper task writes (free, on the subscription).
   score?: number;
   worthTailoring?: boolean;
@@ -117,6 +123,12 @@ export type Internship = Omit<ScraperJob, "firstSeen" | "postedAt" | "score" | "
   bigTech: boolean;
   /** Employer publish time in epoch ms, or null when unknown. */
   postedAt: number | null;
+  /** Result of the last link check: ok | dead | blocked | unknown. */
+  linkVerdict: LinkVerdict | null;
+  /** True for roles you added by hand rather than ones a feed found. */
+  manual?: boolean;
+  /** Where a manual role came from, e.g. "zero2sudo IG". */
+  via?: string;
 } & JobStatus;
 
 function readScraperJobs(): ScraperJob[] {
@@ -153,7 +165,7 @@ export function scraperExists(): boolean {
   return fs.existsSync(SCRAPER_FILE);
 }
 
-/** Merge the scraper feed (scored) with Jarvis's own detected feed (fast, free). */
+/** Merge the scraper feed (scored), Jarvis's detected feed, and manual adds. */
 function mergedJobs(): ScraperJob[] {
   const byId = new Map<string, ScraperJob>();
   // detected first, so a matching scraper entry overrides it (keeps scores etc.)
@@ -162,6 +174,21 @@ function mergedJobs(): ScraperJob[] {
     const id = jobId(j);
     byId.set(id, { ...byId.get(id), ...j });
   }
+  // Manual entries win outright — you typed them, so nothing should rewrite them.
+  for (const m of readManualJobs()) {
+    byId.set(m.id, {
+      company: m.company,
+      role: m.role,
+      url: m.url,
+      location: m.location,
+      postedAt: m.postedAt,
+      firstSeen: m.addedAt,
+      source: "manual",
+      manual: true,
+      via: m.via,
+      manualId: m.id,
+    } as ScraperJob);
+  }
   return [...byId.values()];
 }
 
@@ -169,6 +196,7 @@ export function listInternships(): { internships: Internship[]; scraperConnected
   const detectedCount = getDetectedJobs().length;
   const jobs = mergedJobs();
   const map = readStatusMap();
+  const health = getLinkHealth();
   let dirty = false;
   const now = Date.now();
 
@@ -186,6 +214,7 @@ export function listInternships(): { internships: Internship[]; scraperConnected
       id,
       bigTech: isBigTech(j.company),
       postedAt: j.postedAt ? Date.parse(j.postedAt) || null : null,
+      linkVerdict: j.url ? health[j.url]?.verdict ?? null : null,
       applied: st.applied ?? false,
       appliedAt: st.appliedAt ?? null,
       stage: st.stage ?? (st.applied ? "applied" : "not_applied"),
@@ -249,4 +278,9 @@ export function upcomingDeadlines(withinMs = 14 * 24 * 60 * 60 * 1000): Array<{ 
 
 export function getJobById(id: string): Internship | null {
   return listInternships().internships.find((j) => j.id === id) || null;
+}
+
+/** Every apply URL currently in the ledger — the link sweeper's work list. */
+export function allJobUrls(): string[] {
+  return [...new Set(listInternships().internships.map((j) => j.url).filter(Boolean))];
 }

@@ -1,4 +1,6 @@
-import { listInternships, updateJob, upcomingDeadlines, type Stage } from "@/lib/internships";
+import { allJobUrls, listInternships, updateJob, upcomingDeadlines, type Stage } from "@/lib/internships";
+import { ensureLinkSweeper } from "@/lib/linkHealth";
+import { addManualJob, deleteManualJob } from "@/lib/manualJobs";
 import { aiConfigured } from "@/lib/aiClient";
 import { ensureFetcherRunning, refreshDetected, getFetcherState } from "@/lib/internshipFetcher";
 import { tectonicAvailable } from "@/lib/localTools";
@@ -7,8 +9,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  // Kick off the free background tracker-fetch loop (once per server lifetime).
+  // Kick off the background loops (once per server lifetime).
   ensureFetcherRunning();
+  ensureLinkSweeper(allJobUrls);
   const url = new URL(request.url);
   // ?refresh=1 forces an immediate fetch (used by the refresh buttons) so new
   // roles appear on demand instead of only on the ~5-min background cadence.
@@ -46,7 +49,20 @@ export async function POST(request: Request) {
     deadlineAt?: number | null;
     deadlineLabel?: string | null;
     notes?: string;
+    // manual add
+    add?: { company?: string; role?: string; url?: string; location?: string; via?: string };
   };
+
+  // Hand-entered role (Instagram, Discord, a referral — anywhere a feed can't reach).
+  if (b.add) {
+    const { company, role } = b.add;
+    if (!company?.trim() || !role?.trim()) {
+      return Response.json({ error: "company and role are required" }, { status: 400 });
+    }
+    const job = addManualJob({ ...b.add, company, role });
+    return Response.json({ ok: true, job });
+  }
+
   if (!b.id) return Response.json({ error: "id required" }, { status: 400 });
   updateJob(b.id, {
     applied: b.applied,
@@ -56,4 +72,13 @@ export async function POST(request: Request) {
     notes: b.notes,
   });
   return Response.json({ ok: true });
+}
+
+/** Remove a hand-entered role (feed-sourced ones can't be deleted this way). */
+export async function DELETE(req: Request) {
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id) return Response.json({ error: "id required" }, { status: 400 });
+  return deleteManualJob(id)
+    ? Response.json({ ok: true })
+    : Response.json({ error: "not a manually added role" }, { status: 404 });
 }

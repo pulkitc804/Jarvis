@@ -48,6 +48,10 @@ type Internship = {
   /** Employer publish time when the source reports one, else null. */
   postedAt: number | null;
   source?: string;
+  linkVerdict: "ok" | "dead" | "blocked" | "unknown" | null;
+  manual?: boolean;
+  via?: string;
+  manualId?: string;
   score: number | null;
   worthTailoring: boolean | null;
   scoreReason: string | null;
@@ -144,6 +148,8 @@ export function InternshipTracker() {
   const [deadlineEditor, setDeadlineEditor] = useState<Internship | null>(null);
   const [stageFilter, setStageFilter] = useState<Stage | "all">("all");
   const [sortBy, setSortBy] = useState<"recent" | "score">("recent");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [showAdd, setShowAdd] = useState(false);
 
   const load = useCallback(
     async (force = false) => {
@@ -237,6 +243,12 @@ export function InternshipTracker() {
     }
   }
 
+  async function removeManual(job: Internship) {
+    if (!job.manualId) return;
+    await fetch(`/api/internships?id=${encodeURIComponent(job.manualId)}`, { method: "DELETE" });
+    load(false);
+  }
+
   const allJobs = data?.internships || [];
   const jobs = allJobs
     .filter((j) => stageFilter === "all" || j.stage === stageFilter)
@@ -248,6 +260,22 @@ export function InternshipTracker() {
           (b.postedAt ?? b.firstSeen) - (a.postedAt ?? a.firstSeen),
     );
 
+  // One collapsible group per company, ordered by whichever company has the
+  // most recent activity (or the best fit score when sorting by score).
+  const grouped: Array<[string, Internship[]]> = (() => {
+    const m = new Map<string, Internship[]>();
+    for (const j of jobs) {
+      const list = m.get(j.company);
+      if (list) list.push(j);
+      else m.set(j.company, [j]);
+    }
+    const rank = (list: Internship[]) =>
+      sortBy === "score"
+        ? Math.max(...list.map((j) => j.score ?? -1))
+        : Math.max(...list.map((j) => j.postedAt ?? j.firstSeen));
+    return [...m.entries()].sort((a, b) => rank(b[1]) - rank(a[1]));
+  })();
+
   return (
     <main className="relative z-10 mx-auto w-full max-w-[1400px] px-4 sm:px-6 lg:px-8 py-6">
       <header className="mb-5 flex flex-wrap items-center gap-4">
@@ -256,6 +284,18 @@ export function InternshipTracker() {
         </Link>
         <h1 className="text-xl font-semibold text-[var(--text)]">Internship Tracker</h1>
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setShowAdd((v) => !v)}
+            className="rounded-md border px-3 py-2 text-[12px] font-medium transition"
+            style={
+              showAdd
+                ? { borderColor: "var(--accent)", color: "var(--accent)", background: "color-mix(in srgb, var(--accent) 12%, transparent)" }
+                : { borderColor: "var(--border)", color: "var(--muted)" }
+            }
+            title="Add a role you found yourself — Instagram, Discord, a referral"
+          >
+            + Add role
+          </button>
           <button
             onClick={() => setSortBy((s) => (s === "recent" ? "score" : "recent"))}
             className="rounded-lg border border-[var(--border)] px-3 py-2 text-[12px] font-medium text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--accent)]"
@@ -274,6 +314,16 @@ export function InternshipTracker() {
           </button>
         </div>
       </header>
+
+      {showAdd && (
+        <AddRoleForm
+          onCancel={() => setShowAdd(false)}
+          onAdded={() => {
+            setShowAdd(false);
+            load(false);
+          }}
+        />
+      )}
 
       {/* metrics */}
       {data && (
@@ -379,8 +429,50 @@ export function InternshipTracker() {
       )}
 
       <div className="space-y-2">
-        {jobs.map((j) => (
-          <div key={j.id} className="panel flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+        {grouped.map(([company, list]) => {
+          const open = expanded[company] ?? false;
+          const active = list.filter((j) => j.stage !== "not_applied").length;
+          const newest = Math.max(...list.map((j) => j.postedAt ?? j.firstSeen));
+          const best = list.reduce<number | null>((m, j) => (j.score != null && (m == null || j.score > m) ? j.score : m), null);
+          return (
+            <div key={company} className="panel overflow-hidden">
+              {/* Company header — click to expand that company's postings */}
+              <button
+                onClick={() => setExpanded((e) => ({ ...e, [company]: !open }))}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-white/[0.02]"
+                aria-expanded={open}
+              >
+                <svg
+                  width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                  className="shrink-0 text-[var(--faint)] transition-transform"
+                  style={{ transform: open ? "rotate(90deg)" : "none" }}
+                >
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+                <span className="font-medium text-[var(--text)]">{company}</span>
+                <span className="tnum rounded border border-[var(--border)] px-1.5 py-px text-[11px] text-[var(--muted)]">
+                  {list.length}
+                </span>
+                {active > 0 && (
+                  <span className="tnum rounded px-1.5 py-px text-[11px]" style={{ background: stageTint("applied", 18), color: STAGE_COLOR.applied }}>
+                    {active} in progress
+                  </span>
+                )}
+                {best != null && (
+                  <span className="tnum text-[11px]" style={{ color: scoreColor(best) }}>
+                    best fit {best}
+                  </span>
+                )}
+                <span className="ml-auto text-[11px] text-[var(--faint)]">
+                  latest {relAge(newest)}
+                </span>
+              </button>
+
+              {open && (
+                <div className="border-t border-[var(--border)]">
+                  {list.map((j) => (
+                    <div key={j.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--border)] px-4 py-3 last:border-b-0">
             <select
               value={j.stage}
               onChange={(e) => setStage(j, e.target.value as Stage)}
@@ -402,7 +494,16 @@ export function InternshipTracker() {
             <div className="min-w-[180px] flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-[var(--text)]">{j.company}</span>
-                {j.source && (
+                {j.manual && (
+                  <span
+                    className="rounded px-1.5 py-px text-[10px] font-medium"
+                    style={{ background: stageTint("applied", 18), color: STAGE_COLOR.applied }}
+                    title={j.via ? `Added by you — found via ${j.via}` : "Added by you"}
+                  >
+                    {j.via || "added by you"}
+                  </span>
+                )}
+                {j.source && !j.manual && (
                   <span
                     className="rounded border border-[var(--border)] px-1.5 py-px text-[10px] text-[var(--faint)]"
                     style={DIRECT_SOURCES.includes(j.source) ? { color: "var(--accent)", borderColor: "color-mix(in srgb, var(--accent) 35%, transparent)" } : undefined}
@@ -499,14 +600,47 @@ export function InternshipTracker() {
                   {busy[j.id] === "tailor" ? (data?.tailoringInstant ? "Tailoring…" : "Requesting…") : data?.tailoringInstant ? "Tailor now" : "Tailor this"}
                 </button>
               )}
-              {j.url && (
-                <a href={j.url} target="_blank" rel="noopener noreferrer" className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--muted)] transition hover:text-[var(--accent)] hover:border-[var(--border-strong)]">
-                  Apply ↗
+              {j.manual && j.manualId && (
+                <button
+                  onClick={() => removeManual(j)}
+                  className="rounded-md border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--faint)] transition hover:border-[var(--danger)] hover:text-[var(--danger)]"
+                  title="Remove this hand-added role"
+                >
+                  ✕
+                </button>
+              )}
+              {j.url ? (
+                <a
+                  href={j.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-md border px-2.5 py-1 text-[11px] transition hover:border-[var(--border-strong)]"
+                  style={
+                    j.linkVerdict === "dead"
+                      ? { borderColor: "color-mix(in srgb, var(--danger) 45%, transparent)", color: "var(--danger)" }
+                      : { borderColor: "var(--border)", color: "var(--muted)" }
+                  }
+                  title={
+                    j.linkVerdict === "dead"
+                      ? "Last check returned 404 — this posting looks closed"
+                      : j.linkVerdict === "blocked"
+                        ? "The careers site blocks automated checks; the link should still work in your browser"
+                        : "Open the posting"
+                  }
+                >
+                  {j.linkVerdict === "dead" ? "Link dead" : "Apply ↗"}
                 </a>
+              ) : (
+                <span className="text-[11px] text-[var(--faint)]">no link</span>
               )}
             </div>
-          </div>
-        ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {deadlineEditor && (
@@ -569,6 +703,72 @@ export function InternshipTracker() {
         </div>
       )}
     </main>
+  );
+}
+
+/**
+ * Manual entry for roles no feed can reach — an Instagram page like zero2sudo,
+ * a Discord drop, a recruiter DM. Stored separately from scraped roles so a
+ * scraper pass can never overwrite or prune them.
+ */
+function AddRoleForm({ onCancel, onAdded }: { onCancel: () => void; onAdded: () => void }) {
+  const [company, setCompany] = useState("");
+  const [role, setRole] = useState("");
+  const [url, setUrl] = useState("");
+  const [via, setVia] = useState("zero2sudo IG");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    if (!company.trim() || !role.trim()) {
+      setErr("Company and role are required.");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/internships", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ add: { company, role, url, via } }),
+      });
+      const j = await res.json();
+      if (j.ok) onAdded();
+      else setErr(j.error || "Couldn't save.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const field = "rounded-md border border-[var(--border)] bg-transparent px-2.5 py-1.5 text-[13px] text-[var(--text)] outline-none focus:border-[var(--accent)]";
+
+  return (
+    <div className="panel mb-4 p-3.5">
+      <div className="mb-2.5 flex items-center gap-2">
+        <span className="panel-title">Add a role you found</span>
+        <span className="text-[11px] text-[var(--faint)]">
+          for postings the scrapers can&apos;t see — Instagram, Discord, referrals
+        </span>
+        <button onClick={onCancel} className="ml-auto text-[var(--muted)] transition hover:text-[var(--text)]">
+          ✕
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Company *" className={`${field} w-40`} />
+        <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Role *" className={`${field} min-w-[220px] flex-1`} />
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Apply link (optional)" className={`${field} min-w-[200px] flex-1`} />
+        <input value={via} onChange={(e) => setVia(e.target.value)} placeholder="Found via" className={`${field} w-40`} title="Where you saw it" />
+        <button
+          onClick={save}
+          disabled={saving}
+          className="rounded-md px-3 py-1.5 text-[12px] font-medium text-[#0b0b0d] transition disabled:opacity-50"
+          style={{ background: "var(--accent)" }}
+        >
+          {saving ? "Adding…" : "Add"}
+        </button>
+      </div>
+      {err && <div className="mt-2 text-[12px] text-[var(--danger)]">{err}</div>}
+    </div>
   );
 }
 
