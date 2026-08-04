@@ -157,6 +157,7 @@ export function InternshipTracker() {
   const [showDead, setShowDead] = useState(false);
   const [favOnly, setFavOnly] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
+  const [savedFile, setSavedFile] = useState<string | null>(null);
 
   const load = useCallback(
     async (force = false) => {
@@ -251,12 +252,8 @@ export function InternshipTracker() {
       });
       const j = await res.json();
       if (j.ok) {
-        if (j.mode === "queued") {
-          // optimistic: show "requested" until the scraper fills in the résumé
-          setData((d) => (d ? { ...d, internships: d.internships.map((x) => (x.id === job.id ? { ...x, tailorRequested: true } : x)) } : d));
-        } else {
-          load();
-        }
+        if (j.file) setSavedFile(j.file.split("/").pop() || null);
+        load(false);
       } else alert(j.error || "Tailoring failed");
     } finally {
       setBusy((b) => {
@@ -761,10 +758,6 @@ export function InternshipTracker() {
                 <button onClick={() => setViewTex(j)} className="rounded-md bg-[var(--good)]/15 px-2.5 py-1 text-[11px] font-medium text-[var(--good)] transition hover:bg-[var(--good)]/25" title="Preview the tailored résumé as a PDF">
                   View PDF
                 </button>
-              ) : j.tailorRequested ? (
-                <span className="rounded-md border border-[var(--warn)]/40 px-2 py-1 text-[10px] font-medium text-[var(--warn)]" title="Requested — the scraper tailors it on its next run, then it appears here as a PDF">
-                  Tailoring requested…
-                </span>
               ) : (
                 <button
                   onClick={() => runTailor(j)}
@@ -774,9 +767,9 @@ export function InternshipTracker() {
                       ? "bg-[var(--accent2)]/18 text-[var(--accent2)] hover:bg-[var(--accent2)]/28"
                       : "border border-[var(--border)] text-[var(--muted)] hover:text-[var(--accent2)] hover:border-[var(--border-strong)]"
                   }`}
-                  title={data?.tailoringInstant ? "Tailor your résumé for this role now" : "Request a tailored résumé — the scraper generates it on its next run"}
+                  title="Tailor your résumé for this role and save it to the submit folder"
                 >
-                  {busy[j.id] === "tailor" ? (data?.tailoringInstant ? "Tailoring…" : "Requesting…") : data?.tailoringInstant ? "Tailor now" : "Tailor this"}
+                  {busy[j.id] === "tailor" ? "Tailoring…" : "Tailor now"}
                 </button>
               )}
               {j.manual && j.manualId ? (
@@ -842,6 +835,22 @@ export function InternshipTracker() {
           );
         })}
       </div>
+
+      {savedFile && (
+        <div
+          className="panel fixed bottom-5 right-5 z-50 flex max-w-md items-center gap-3 px-4 py-3 text-[13px]"
+          style={{ borderColor: "color-mix(in srgb, var(--good) 45%, transparent)" }}
+        >
+          <span style={{ color: "var(--good)" }}>✓</span>
+          <span className="min-w-0">
+            <span className="text-[var(--text)]">Saved to “submit resumes”</span>
+            <span className="mono block truncate text-[11px] text-[var(--faint)]">{savedFile}</span>
+          </span>
+          <button onClick={() => setSavedFile(null)} className="ml-auto text-[var(--muted)] hover:text-[var(--text)]">
+            ✕
+          </button>
+        </div>
+      )}
 
       {deadlineEditor && (
         <DeadlineEditor
