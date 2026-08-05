@@ -4,6 +4,7 @@ import os from "node:os";
 import { getDetectedJobs } from "./internshipFetcher";
 import { readManualJobs } from "./manualJobs";
 import { getLinkHealth, type LinkVerdict } from "./linkHealth";
+import { isFortune500, isTargetEmployer } from "./fortune500";
 
 /**
  * Internship tracker data layer.
@@ -50,6 +51,51 @@ export function normalizeCompany(c: string): string {
     .replace(/\b(inc|llc|corp|corporation|co|ltd|technologies|technology|labs|the)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * One display name per employer, so "Palantir" and "Palantir Technologies"
+ * don't render as two separate groups. Feeds disagree on suffixes and casing.
+ */
+const CANONICAL: Array<[RegExp, string]> = [
+  [/^palantir\b/i, "Palantir"],
+  [/^bytedance\b/i, "ByteDance"],
+  [/^tiktok\b/i, "TikTok"],
+  [/^imc\b/i, "IMC"],
+  [/^sap\b/i, "SAP"],
+  [/^ibm\b/i, "IBM"],
+  [/^hp\b|^hewlett.?packard\b/i, "HP"],
+  [/^jpmorgan|^j\.?p\.? morgan/i, "JPMorgan Chase"],
+  [/^capital.?one\b/i, "Capital One"],
+  [/^goldman\b/i, "Goldman Sachs"],
+  [/^amazon(\.com)?\b|^aws\b/i, "Amazon"],
+  [/^alphabet\b|^google\b/i, "Google"],
+  [/^meta\b|^facebook\b/i, "Meta"],
+  [/^microsoft\b/i, "Microsoft"],
+  [/^nvidia\b/i, "NVIDIA"],
+  [/^spacex\b|^space exploration/i, "SpaceX"],
+  [/^chicago trading\b|^ctc\b/i, "Chicago Trading Company"],
+  [/^scale ai\b|^scaleai\b/i, "Scale AI"],
+  [/^anduril\b/i, "Anduril"],
+  [/^drw\b/i, "DRW"],
+  [/^jump trading\b/i, "Jump Trading"],
+  [/^raytheon\b|^rtx\b/i, "RTX"],
+  [/^susquehanna\b/i, "Susquehanna"],
+  [/^(the )?home depot\b/i, "Home Depot"],
+  // NB: "Citadel" and "Citadel Securities" are deliberately NOT merged —
+  // the hedge fund and the market maker hire separately.
+];
+
+export function canonicalCompany(company: string): string {
+  const c = (company || "").trim();
+  for (const [re, name] of CANONICAL) if (re.test(c)) return name;
+  return (
+    c
+      .replace(/\s*\([^)]*\)\s*$/, "") // trailing "(SIG)"
+      .replace(/\s+[-–—]\s+.*$/, "") // trailing " - University Jobs"
+      .replace(/[,]?\s+(inc|llc|corp|corporation|ltd|plc|co)\.?$/i, "")
+      .trim() || c
+  );
 }
 
 export function isBigTech(company: string): boolean {
@@ -128,6 +174,10 @@ export type JobStatus = {
 export type Internship = Omit<ScraperJob, "firstSeen" | "postedAt" | "score" | "worthTailoring" | "scoreReason" | "tailoredResume"> & {
   id: string;
   bigTech: boolean;
+  /** On the Fortune 500 list. */
+  f500: boolean;
+  /** F500 or a notable private employer (SpaceX, Palantir, OpenAI, …). */
+  targetEmployer: boolean;
   /** Employer publish time in epoch ms, or null when unknown. */
   postedAt: number | null;
   /** Result of the last link check: ok | dead | blocked | unknown. */
@@ -264,8 +314,11 @@ export function listInternships(): { internships: Internship[]; scraperConnected
     }
     return {
       ...j,
+      company: canonicalCompany(j.company),
       id,
       bigTech: isBigTech(j.company),
+      f500: isFortune500(j.company),
+      targetEmployer: isTargetEmployer(j.company),
       postedAt: j.postedAt ? Date.parse(j.postedAt) || null : null,
       linkVerdict: j.url ? health[j.url]?.verdict ?? null : null,
       applied: st.applied ?? false,

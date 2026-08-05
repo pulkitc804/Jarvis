@@ -1,4 +1,5 @@
-import { isBigTech, isUndergradRole } from "./internships";
+import { isUndergradRole } from "./internships";
+import { isTargetEmployer } from "./fortune500";
 import { getJson, pool, postJson, request } from "./scraperCore";
 
 /**
@@ -360,7 +361,7 @@ function parseTrackerTable(md: string): DetectedJob[] {
     if (STALE_YEAR_RE.test(role) && !TARGET_YEAR_RE.test(role)) continue;
     const href = applyRaw.match(/href="([^"]+)"/) || applyRaw.match(/\((https?:\/\/[^)]+)\)/);
     if (!href) continue; // closed roles carry no apply link
-    if (!isBigTech(company)) continue;
+    if (!isTargetEmployer(company)) continue;
     out.push({ company, role, location: stripTags(locRaw), url: cleanUrl(href[1]), source: "tracker" });
   }
   return out;
@@ -407,7 +408,7 @@ function parseTrackerHtmlTable(html: string): DetectedJob[] {
     // Closed roles render a lock/🔒 instead of an anchor.
     const href = cells[3].match(/href="([^"]+)"/);
     if (!href) continue;
-    if (!isBigTech(company)) continue;
+    if (!isTargetEmployer(company)) continue;
 
     // Last column is an age like "0d" / "13d" — good enough for a posted date.
     const age = stripTags(cells[4] || "").match(/^(\d+)\s*d/i);
@@ -492,7 +493,7 @@ export async function fetchInternInsider(): Promise<DetectedJob[]> {
     // which slips past the graduate-only check that the raw text catches.
     const rawRole = parts[1].replace(/-[0-9a-f-]{30,}$/i, "").replace(/-+/g, " ");
     if (!isTargetRole(role) || !isTargetRole(rawRole)) continue;
-    if (!isBigTech(company)) continue; // their catalogue is mostly non-tech
+    if (!isTargetEmployer(company)) continue; // their catalogue is mostly non-tech
 
     out.push({
       company,

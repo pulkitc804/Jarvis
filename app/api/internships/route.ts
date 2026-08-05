@@ -26,14 +26,21 @@ export async function GET(request: Request) {
   // ?refresh=1 forces an immediate fetch (used by the refresh buttons) so new
   // roles appear on demand instead of only on the ~5-min background cadence.
   if (url.searchParams.get("refresh") === "1") await refreshDetected();
-  const bigTechOnly = url.searchParams.get("all") !== "1";
+  const targetOnly = url.searchParams.get("all") !== "1";
   const { internships, scraperConnected, scraperFile, detectedCount } = listInternships();
-  const bigTechCount = internships.filter((i) => i.bigTech).length;
-  const shown = bigTechOnly ? internships.filter((i) => i.bigTech) : internships;
+  const bigTechCount = internships.filter((i) => i.targetEmployer).length;
+  const f500Count = internships.filter((i) => i.f500).length;
+  // Default view is F500 + notable private employers. Anything you've engaged
+  // with stays visible regardless of tier, so a role you applied to never
+  // vanishes because its employer isn't on a list.
+  const shown = targetOnly
+    ? internships.filter((i) => i.targetEmployer || i.stage !== "not_applied" || i.favorite)
+    : internships;
   return Response.json({
     internships: shown,
     total: internships.length,
     bigTechCount,
+    f500Count,
     appliedCount: internships.filter((i) => i.applied).length,
     stageCounts: internships.reduce<Record<string, number>>((acc, i) => ((acc[i.stage] = (acc[i.stage] || 0) + 1), acc), {}),
     upcomingDeadlines: upcomingDeadlines(),

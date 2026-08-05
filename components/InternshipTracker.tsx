@@ -39,6 +39,8 @@ type Internship = {
   url: string;
   location?: string;
   bigTech: boolean;
+  f500: boolean;
+  targetEmployer: boolean;
   applied: boolean;
   appliedAt: number | null;
   stage: Stage;
@@ -67,6 +69,7 @@ type Resp = {
   internships: Internship[];
   total: number;
   bigTechCount: number;
+  f500Count: number;
   appliedCount: number;
   stageCounts: Record<string, number>;
   upcomingDeadlines: Array<{ id: string; company: string; role: string; deadlineAt: number; deadlineLabel: string | null }>;
@@ -160,6 +163,9 @@ export function InternshipTracker() {
   const [favOnly, setFavOnly] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [savedFile, setSavedFile] = useState<string | null>(null);
+  // Most live postings don't put a year in the title; since it's the 2027
+  // recruiting cycle they're almost all 2027. This narrows to the explicit ones.
+  const [only2027, setOnly2027] = useState(false);
 
   const load = useCallback(
     async (force = false) => {
@@ -307,6 +313,7 @@ export function InternshipTracker() {
   const jobs = allJobs
     .filter((j) => (showHidden ? j.hidden : !j.hidden))
     .filter((j) => !favOnly || j.favorite)
+    .filter((j) => !only2027 || /\b2027\b/.test(j.role))
     .filter((j) => stageFilter === "all" || j.stage === stageFilter)
     // Keep a dead posting visible if you've already engaged with it.
     .filter((j) => showDead || j.linkVerdict !== "dead" || j.stage !== "not_applied")
@@ -365,7 +372,7 @@ export function InternshipTracker() {
             onClick={() => setBigTechOnly((v) => !v)}
             className={`rounded-lg border px-3 py-2 text-[12px] font-medium transition ${bigTechOnly ? "border-[var(--accent)]/50 text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)]"}`}
           >
-            {bigTechOnly ? "Big tech only" : "Showing all"}
+            {bigTechOnly ? "F500 + notable" : "Showing all"}
           </button>
           <button
             onClick={() => {
@@ -393,7 +400,7 @@ export function InternshipTracker() {
       {/* metrics */}
       {data && (
         <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
-          <MetricCard label="Big tech" value={data.bigTechCount} accent="var(--text)" />
+          <MetricCard label="Fortune 500" value={data.f500Count} accent="var(--text)" />
           <MetricCard label="Applied" value={data.appliedCount} accent={STAGE_COLOR.applied} />
           <MetricCard label="OA" value={data.stageCounts.oa || 0} accent={STAGE_COLOR.oa} />
           <MetricCard label="Interview" value={data.stageCounts.interview || 0} accent={STAGE_COLOR.interview} />
@@ -420,6 +427,18 @@ export function InternshipTracker() {
             title="Show only starred roles"
           >
             ★ Favorites ({favCount})
+          </button>
+          <button
+            onClick={() => setOnly2027((v) => !v)}
+            className="rounded-md border px-2.5 py-1 text-[11px] font-medium transition"
+            style={
+              only2027
+                ? { borderColor: "var(--accent)", background: "color-mix(in srgb, var(--accent) 14%, transparent)", color: "var(--accent)" }
+                : { borderColor: "var(--border)", color: "var(--muted)" }
+            }
+            title="Only roles that say 2027 in the title. Most live postings omit the year — they're this cycle regardless."
+          >
+            2027 only ({allJobs.filter((j) => /\b2027\b/.test(j.role)).length})
           </button>
           {hiddenCount > 0 && (
             <button
@@ -558,6 +577,15 @@ export function InternshipTracker() {
                   <polyline points="9 18 15 12 9 6" />
                 </svg>
                 <span className="font-medium text-[var(--text)]">{company}</span>
+                {list[0]?.f500 && (
+                  <span
+                    className="rounded px-1.5 py-px text-[10px] font-medium"
+                    style={{ background: "color-mix(in srgb, var(--accent) 15%, transparent)", color: "var(--accent)" }}
+                    title="Fortune 500 company"
+                  >
+                    F500
+                  </span>
+                )}
                 <span className="tnum rounded border border-[var(--border)] px-1.5 py-px text-[11px] text-[var(--muted)]">
                   {list.length}
                 </span>
