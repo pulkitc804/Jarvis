@@ -108,6 +108,33 @@ function matches(list: string[], company: string): boolean {
   return list.some((t) => n.includes(" " + normalize(t) + " "));
 }
 
+/**
+ * Quant / trading / banking shops. Excluded by default: the ask is software
+ * engineering, and these firms otherwise dominate the ledger with insight days
+ * and trading roles. Set JARVIS_INCLUDE_FINANCE=1 to keep them.
+ */
+const FINANCE_FIRMS = [
+  "jane street", "citadel", "citadel securities", "two sigma", "jump trading", "drw",
+  "hudson river trading", "optiver", "imc", "imc trading", "susquehanna", "sig",
+  "de shaw", "d e shaw", "millennium", "millenium", "point72", "akuna", "akuna capital",
+  "belvedere", "peak6", "old mission", "wolverine trading", "tower research",
+  "five rings", "headlands", "qube research", "man group", "aqr", "bridgewater",
+  "chicago trading", "ctc", "group one trading", "cboe", "virtu",
+  "goldman sachs", "morgan stanley", "jpmorgan", "citigroup", "citi", "barclays",
+  "credit suisse", "ubs", "deutsche bank", "hsbc", "wells fargo", "bank of america",
+  "blackrock", "blackstone", "kkr", "apollo global", "carlyle", "evercore", "lazard",
+  "jefferies", "nomura", "bnp paribas", "societe generale", "rbc capital",
+];
+
+export function isFinanceFirm(company: string): boolean {
+  return matches(FINANCE_FIRMS, company);
+}
+
+/** Honour the opt-in env flag, else exclude finance. */
+export function financeExcluded(): boolean {
+  return process.env.JARVIS_INCLUDE_FINANCE !== "1";
+}
+
 export function isFortune500(company: string): boolean {
   return matches(FORTUNE_500, company);
 }
@@ -118,5 +145,6 @@ export function isNotable(company: string): boolean {
 
 /** F500 or a notable private employer — the default "worth my time" tier. */
 export function isTargetEmployer(company: string): boolean {
+  if (financeExcluded() && isFinanceFirm(company)) return false;
   return isFortune500(company) || isNotable(company);
 }

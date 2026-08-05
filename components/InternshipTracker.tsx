@@ -746,22 +746,34 @@ export function InternshipTracker({ kind = "internship" }: { kind?: "internship"
               <div className="truncate text-[13px] text-[var(--muted)]">{j.role}</div>
             </div>
 
-            {/* Ledger stamp: the employer's publish time when we have it,
-                otherwise when Jarvis first saw the role. */}
+            {/* Both stamps, always: when the employer published it, and when
+                Jarvis saw it. They differ a lot for tracker-sourced rows, and
+                collapsing them into one date hid which was which. */}
             <div
-              className="w-[124px] shrink-0 leading-tight"
+              className="w-[178px] shrink-0 leading-tight"
               title={
-                (j.postedAt ? `Posted ${fmtStamp(j.postedAt)}` : `No publish time from this source`) +
-                `\nDetected by Jarvis ${fmtStamp(j.firstSeen)}` +
+                (j.postedAt
+                  ? `Posted by employer: ${fmtStamp(j.postedAt)} (${relAge(j.postedAt)})`
+                  : "This source doesn't report a publish time") +
+                `\nDetected by Jarvis: ${fmtStamp(j.firstSeen)} (${relAge(j.firstSeen)})` +
                 (j.source ? `\nSource: ${SOURCE_LABEL[j.source] || j.source}` : "")
               }
             >
-              <div className="tnum text-[12px] text-[var(--text)]">
-                {fmtDate(j.postedAt ?? j.firstSeen)}
-                <span className="ml-1.5 text-[var(--muted)]">{fmtTime(j.postedAt ?? j.firstSeen)}</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="w-[52px] shrink-0 text-[10px] text-[var(--faint)]">Posted</span>
+                {j.postedAt ? (
+                  <span className="tnum text-[12px] text-[var(--text)]">
+                    {fmtDate(j.postedAt)} <span className="text-[var(--muted)]">{fmtTime(j.postedAt)}</span>
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-[var(--faint)]">not reported</span>
+                )}
               </div>
-              <div className="text-[10px] text-[var(--faint)]">
-                {j.postedAt ? `posted · ${relAge(j.postedAt)}` : `detected · ${relAge(j.firstSeen)}`}
+              <div className="flex items-baseline gap-1.5">
+                <span className="w-[52px] shrink-0 text-[10px] text-[var(--faint)]">Detected</span>
+                <span className="tnum text-[11px] text-[var(--muted)]">
+                  {fmtDate(j.firstSeen)} <span className="text-[var(--faint)]">{fmtTime(j.firstSeen)}</span>
+                </span>
               </div>
             </div>
 

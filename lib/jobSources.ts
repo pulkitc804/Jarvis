@@ -74,8 +74,31 @@ export function classify(title: string, company = ""): OpportunityKind | null {
   return isTargetRole(title) ? "internship" : null;
 }
 
+/** Tracking params worth dropping. Everything else is left alone. */
+const TRACKING_PARAMS = /^(utm_[a-z]+|gh_src|ref|source|src)$/i;
+
+/**
+ * Strip tracking params by parsing the URL, NOT by regex.
+ *
+ * The old regex removed "?utm_source=x" including its leading "?", which turned
+ *   .../search/123?utm_source=Simplify&ref=Simplify
+ * into
+ *   .../search/123&ref=Simplify
+ * — an orphaned "&" that became part of the path and 404'd. That produced a
+ * large number of dead links that were entirely self-inflicted.
+ */
 function cleanUrl(u: string): string {
-  return u.replace(/[?&]utm_source=[^&]*/g, "").replace(/[?&]$/, "").trim();
+  const raw = (u || "").trim();
+  try {
+    const url = new URL(raw);
+    for (const key of [...url.searchParams.keys()]) {
+      if (TRACKING_PARAMS.test(key)) url.searchParams.delete(key);
+    }
+    // Drop a trailing "?" left behind when every param was tracking.
+    return url.toString().replace(/\?$/, "");
+  } catch {
+    return raw; // not a parseable URL — never mangle it further
+  }
 }
 
 function stripTags(s: string): string {

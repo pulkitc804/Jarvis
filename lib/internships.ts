@@ -4,7 +4,7 @@ import os from "node:os";
 import { getDetectedJobs } from "./internshipFetcher";
 import { readManualJobs } from "./manualJobs";
 import { getLinkHealth, type LinkVerdict } from "./linkHealth";
-import { isFortune500, isTargetEmployer } from "./fortune500";
+import { financeExcluded, isFinanceFirm, isFortune500, isTargetEmployer } from "./fortune500";
 import type { OpportunityKind } from "./earlyCareer";
 
 /**
@@ -353,7 +353,14 @@ export function listInternships(): { internships: Internship[]; scraperConnected
   if (dirty) writeStatusMap(map);
 
   // Undergrad-only: never surface PhD/Masters-only roles regardless of source.
-  const undergrad = internships.filter((j) => isUndergradRole(j.role));
+  // Also drop finance/quant firms here, so entries from the legacy scraper file
+  // — which never passed through the fetcher's employer filter — are excluded
+  // too. Anything you've engaged with is exempt.
+  const undergrad = internships.filter(
+    (j) =>
+      isUndergradRole(j.role) &&
+      (!financeExcluded() || !isFinanceFirm(j.company) || j.stage !== "not_applied" || j.favorite),
+  );
 
   // big tech first, then most-recently-detected
   undergrad.sort((a, b) => (a.bigTech === b.bigTech ? b.firstSeen - a.firstSeen : a.bigTech ? -1 : 1));
