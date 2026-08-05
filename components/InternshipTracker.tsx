@@ -147,6 +147,16 @@ function hoursUntil(ms: number) {
   return Math.round((ms - Date.now()) / 3_600_000);
 }
 
+const ARCHIVE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
+/** The date the ledger sorts and displays by: real publish time when known. */
+function effectiveDate(j: { postedAt: number | null; firstSeen: number }) {
+  return j.postedAt ?? j.firstSeen;
+}
+/** Older than 3 days — stale enough to move out of the working view. */
+function isArchived(j: { postedAt: number | null; firstSeen: number }) {
+  return Date.now() - effectiveDate(j) > ARCHIVE_AFTER_MS;
+}
+
 export function InternshipTracker() {
   const [data, setData] = useState<Resp | null>(null);
   const [bigTechOnly, setBigTechOnly] = useState(true);
@@ -166,6 +176,7 @@ export function InternshipTracker() {
   // Most live postings don't put a year in the title; since it's the 2027
   // recruiting cycle they're almost all 2027. This narrows to the explicit ones.
   const [only2027, setOnly2027] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
 
   const load = useCallback(
     async (force = false) => {
@@ -310,8 +321,14 @@ export function InternshipTracker() {
   const deadCount = allJobs.filter((j) => j.linkVerdict === "dead" && !j.hidden).length;
   const hiddenCount = allJobs.filter((j) => j.hidden).length;
   const favCount = allJobs.filter((j) => j.favorite).length;
+  // A role you're actually working stays in the live view however old it is —
+  // archiving is for postings that went stale untouched, not your pipeline.
+  const stillActive = (j: Internship) => j.stage !== "not_applied" || j.favorite;
+  const archivedCount = allJobs.filter((j) => !j.hidden && isArchived(j) && !stillActive(j)).length;
+
   const jobs = allJobs
     .filter((j) => (showHidden ? j.hidden : !j.hidden))
+    .filter((j) => (showArchive ? isArchived(j) && !stillActive(j) : !isArchived(j) || stillActive(j)))
     .filter((j) => !favOnly || j.favorite)
     .filter((j) => !only2027 || /\b2027\b/.test(j.role))
     .filter((j) => stageFilter === "all" || j.stage === stageFilter)
@@ -440,6 +457,18 @@ export function InternshipTracker() {
           >
             2027 only ({allJobs.filter((j) => /\b2027\b/.test(j.role)).length})
           </button>
+          <button
+            onClick={() => setShowArchive((v) => !v)}
+            className="rounded-md border px-2.5 py-1 text-[11px] font-medium transition"
+            style={
+              showArchive
+                ? { borderColor: "var(--accent)", background: "color-mix(in srgb, var(--accent) 14%, transparent)", color: "var(--accent)" }
+                : { borderColor: "var(--border)", color: "var(--faint)" }
+            }
+            title="Postings older than 3 days. Anything you've applied to or starred stays in the live view."
+          >
+            {showArchive ? "← Back to live" : `Archive (${archivedCount})`}
+          </button>
           {hiddenCount > 0 && (
             <button
               onClick={() => setShowHidden((v) => !v)}
@@ -546,9 +575,13 @@ export function InternshipTracker() {
 
       {jobs.length === 0 && !loading && (
         <div className="panel grid place-items-center p-12 text-center">
-          <div className="text-sm text-[var(--text)]">No {bigTechOnly ? "big-tech " : ""}internships yet.</div>
+          <div className="text-sm text-[var(--text)]">
+            {showArchive ? "Nothing archived yet." : showHidden ? "Nothing hidden." : "No matching internships."}
+          </div>
           <div className="mt-1 max-w-md text-[12px] text-[var(--muted)]">
-            The scraper adds Summer 2027 SWE / AI-ML / Data roles as it finds them. Toggle “Showing all” to include smaller companies.
+            {showArchive
+              ? "Postings older than 3 days land here, unless you've applied to or starred them."
+              : "Jarvis adds undergrad 2027 SWE / AI-ML / Data roles as it finds them. Switch to “Showing all” to include employers outside the F500."}
           </div>
         </div>
       )}
