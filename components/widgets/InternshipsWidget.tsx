@@ -28,6 +28,7 @@ type Resp = {
   internships: Internship[];
   total: number;
   bigTechCount: number;
+  f500Count: number;
   appliedCount: number;
   upcomingDeadlines: Deadline[];
   scraperConnected: boolean;
@@ -70,7 +71,7 @@ export function InternshipsWidget() {
       {data && (
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
           <div className="grid grid-cols-4 gap-2.5 lg:w-[420px] lg:shrink-0">
-            <Stat label="Big tech" value={data.bigTechCount} accent="var(--accent)" />
+            <Stat label="Fortune 500" value={data.f500Count} accent="var(--accent)" />
             <Stat label="Applied" value={data.appliedCount} accent={STAGE_COLOR.applied} />
             <Stat label="Worth tailoring" value={worth} accent="var(--accent2)" />
             <Stat label="All roles" value={data.total} />

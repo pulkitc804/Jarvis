@@ -17,6 +17,14 @@
 const NOT_A_STUDENT_ROLE_RE =
   /\b(sr\.?|senior|staff|principal|lead|head of|manager|director|coordinator|recruiter|representative|specialist|partner|executive|vp|president|architect|consultant)\b/i;
 
+/**
+ * Full-time bands that borrow programme vocabulary. "Early Career" at Notion
+ * and Anduril is a new-grad FULL-TIME role, not a student programme, and this
+ * tracker is for 2027 summer internships.
+ */
+const FULL_TIME_BAND_RE =
+  /\b(early career|new ?grad(uate)?|entry[- ]level|full[- ]time|experienced)\b/i;
+
 /** Programs must still be technical — a Teacher Fellow isn't in scope. */
 const TECH_CONTEXT_RE =
   /\b(software|engineer|engineering|swe|sde|comput|data|machine learning|\bml\b|\bai\b|technolog|technical|tech|quant|trading|developer|cyber|security|product|research|stem|analytics)\b/i;
@@ -29,7 +37,12 @@ const NAMED_PROGRAMS = [
   "career prep", "uber career prep", "engineering residency", "apprenticeship",
   "futureforce", "future engineer", "ignite program", "nvidia ignite",
   "accelerate program", "catalyst program", "early insight", "insight program",
-  "discovery day", "discover program", "spring insight", "sophomore summit",
+  // Re-admitted now that the seniority guard rejects the roles that RUN these
+  // programmes — previously these pulled in coordinators and recruiters.
+  "emerging talent", "early talent", "campus program",
+  "university program", "student program", "launch program", "propel program",
+  "amplify program", "launchpad", "pathways program", "bridge program",
+  "immersion program", "externship", "pre-internship", "leadership development program", "software engineering program",   "discovery day", "discover program", "spring insight", "sophomore summit",
   "freshman leaders", "first year", "first-year", "rising sophomore", "rising freshman",
   // Finance / quant early programs
   "code for good", "data for good", "winning women", "advancing black pathways",
@@ -72,6 +85,7 @@ export function isEarlyCareerProgram(title: string, company = ""): boolean {
   if (GRAD_PROGRAM_RE.test(title)) return false;
   // Reject the roles that *run* these programs rather than seats in them.
   if (NOT_A_STUDENT_ROLE_RE.test(title)) return false;
+  if (FULL_TIME_BAND_RE.test(title)) return false;
 
   // An explicit freshman/sophomore signal is enough on its own — that phrasing
   // is only ever used for student programs.

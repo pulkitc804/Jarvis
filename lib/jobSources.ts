@@ -34,7 +34,14 @@ export type DetectedJob = {
 /* ------------------------------------------------------------------ filters */
 
 // Word-boundary "intern": plain /intern/ also matches "International".
-const INTERN_RE = /\bintern(ship|s)?\b|\bco-?op\b|\bstudent researcher\b|\bnew grad\b|\buniversity grad\b/i;
+// "new grad" / "university grad" are deliberately NOT here — those are
+// full-time roles, and accepting them put things like Mastercard "Software
+// Engineer I" and PayPal "Software Engineer, Cloud Infrastructure" in a ledger
+// that is supposed to hold 2027 summer internships only.
+const INTERN_RE = /\bintern(ship|s)?\b|\bco-?op\b|\bstudent researcher\b/i;
+/** Full-time postings that must never be filed as internships. */
+const FULL_TIME_RE =
+  /\bnew ?grad(uate)?\b|\buniversity grad\b|\bentry[- ]level\b|\bfull[- ]time\b|\bsoftware engineer (i{1,3}|[123])\b|\b(senior|staff|principal|lead)\b/i;
 const TECH_RE =
   /software engineer|software dev|\bswe\b|\bsde\b|machine learning|\bml\b|\bai\b|data scien|data eng|applied scien|research (engineer|scientist|intern)|full.?stack|back.?end|front.?end|infrastructure|platform|computer vision|\bnlp\b|deep learning|security engineer|systems engineer/i;
 const TARGET_YEAR_RE = /\b2027\b/;
@@ -43,6 +50,7 @@ const STALE_YEAR_RE = /\b(2019|2020|2021|2022|2023|2024|2025|2026)\b/;
 /** Undergrad-eligible tech internship for the target cycle. */
 export function isTargetRole(title: string): boolean {
   if (!title) return false;
+  if (FULL_TIME_RE.test(title)) return false;
   if (!INTERN_RE.test(title)) return false;
   if (!TECH_RE.test(title)) return false;
   if (!isUndergradRole(title)) return false;
@@ -316,8 +324,6 @@ export const TRACKERS = [
   "https://raw.githubusercontent.com/Chieler/Summer-2027-SWE-Internships/HEAD/README.md",
   "https://raw.githubusercontent.com/sndsh404/summer-2027-internships/HEAD/README.md",
   "https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/HEAD/INTERN_INTL.md",
-  "https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/HEAD/NEW_GRAD_USA.md",
-  "https://raw.githubusercontent.com/ReaVNaiL/New-Grad-2024/HEAD/README.md",
 ];
 
 /* ---------------------------------------------- tracker auto-discovery ----
@@ -386,7 +392,10 @@ function parseTrackerTable(md: string): DetectedJob[] {
     const role = stripTags(roleRaw);
     // These tables are already internship-scoped, so don't demand the literal
     // word "intern" in every row — but the rest of the filters still apply.
-    const kind = classify(role, company) ?? (TECH_RE.test(role) && isUndergradRole(role) && !(STALE_YEAR_RE.test(role) && !TARGET_YEAR_RE.test(role)) ? "internship" : null);
+    // No loose fallback here. Tracker tables used to be internship-only, but
+    // the list now includes new-grad boards, and a fallback that skipped the
+    // "intern" check let their full-time roles straight through.
+    const kind = classify(role, company);
     if (!kind) continue;
     const href = applyRaw.match(/href="([^"]+)"/) || applyRaw.match(/\((https?:\/\/[^)]+)\)/);
     if (!href) continue; // closed roles carry no apply link
@@ -432,7 +441,10 @@ function parseTrackerHtmlTable(html: string): DetectedJob[] {
 
     const role = stripTags(cells[1]);
     if (!role) continue;
-    const kind = classify(role, company) ?? (TECH_RE.test(role) && isUndergradRole(role) && !(STALE_YEAR_RE.test(role) && !TARGET_YEAR_RE.test(role)) ? "internship" : null);
+    // No loose fallback here. Tracker tables used to be internship-only, but
+    // the list now includes new-grad boards, and a fallback that skipped the
+    // "intern" check let their full-time roles straight through.
+    const kind = classify(role, company);
     if (!kind) continue;
 
     // Closed roles render a lock/🔒 instead of an anchor.

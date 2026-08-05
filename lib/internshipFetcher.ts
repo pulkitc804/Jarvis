@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { isUndergradRole } from "./internships";
+import { canonicalCompany, isUndergradRole } from "./internships";
 import { BOARD_COUNT, fetchEverything, trackerCount, type DetectedJob, type SourceReport } from "./jobSources";
 import { cachedUrlCount } from "./scraperCore";
 
@@ -40,9 +40,16 @@ function better(a: DetectedJob, b: DetectedJob): DetectedJob {
   return a.postedAt ? a : b;
 }
 
-/** Same role seen on two sources → one entry. Company+role is stabler than URL. */
+/**
+ * Same role seen on two sources → one entry. Company+role is stabler than URL,
+ * but the company has to be canonicalised first: feeds disagree on suffixes
+ * ("Palantir" on Lever vs "Palantir Technologies" on an aggregator), and a raw
+ * key lets both copies survive — which meant the aggregator's indirect link
+ * could sit alongside the employer's real one.
+ */
 function dedupeKey(j: DetectedJob): string {
-  return `${j.company.toLowerCase().trim()}::${j.role.toLowerCase().replace(/\s+/g, " ").trim()}`;
+  const company = canonicalCompany(j.company).toLowerCase().trim();
+  return `${company}::${j.role.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()}`;
 }
 
 function readJson<T>(file: string, fallback: T): T {
