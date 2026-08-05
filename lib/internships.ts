@@ -59,7 +59,9 @@ export function isBigTech(company: string): boolean {
 
 // The candidate is an undergrad (rising junior). Drop graduate-only roles unless
 // the title also signals bachelor's/undergrad eligibility (e.g. "BS/MS").
-const GRAD_ONLY_RE = /\bph\.?d\b|\bdoctoral\b|\bpost-?doc\b|\bmaster'?s\b|\bmba\b|\bms\b|graduate students?/i;
+// `master[' -]?s` also catches "master s", which is what slugified URLs turn
+// "master's" into once the apostrophe is stripped.
+const GRAD_ONLY_RE = /\bph\.?d\b|\bdoctoral\b|\bpost-?doc\b|\bmaster['\s-]?s\b|\bmba\b|\bms\b|graduate students?/i;
 const UNDERGRAD_OK_RE = /\bb\.?s\.?\b|\bb\.?a\.?\b|\bbachelor'?s?\b|\bundergrad(uate)?\b|\bsophomore\b|rising junior|\bfreshman\b/i;
 export function isUndergradRole(role: string): boolean {
   if (!role) return true;

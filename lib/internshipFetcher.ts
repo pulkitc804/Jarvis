@@ -25,9 +25,12 @@ const SOURCE_RANK: Record<string, number> = {
   workday: 0,
   amazon: 0,
   tracker: 1,
-  indeed: 2,
-  reddit: 3,
-  hackernews: 4,
+  // Aggregators link to their own page rather than the employer's ATS, so they
+  // rank below trackers — a direct apply link always wins when both have a role.
+  interninsider: 2,
+  indeed: 3,
+  reddit: 4,
+  hackernews: 5,
 };
 function better(a: DetectedJob, b: DetectedJob): DetectedJob {
   const ra = SOURCE_RANK[a.source || ""] ?? 9;

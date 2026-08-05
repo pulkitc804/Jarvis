@@ -441,7 +441,75 @@ export function trackerCount(): number {
   return new Set([...TRACKERS, ...(discovered?.urls || [])]).size;
 }
 
-/* ---------------------------------------------------------------- 3. social */
+/* ------------------------------------------------- 3. aggregator: Intern Insider
+ * Their listing pages don't paginate server-side (every page returns the same
+ * rows), but robots.txt allows the sitemap, and sitemap-seo/jobs-open
+ * enumerates every open posting with a lastmod date — which sidesteps
+ * pagination entirely. /api/ is Disallow'd in robots.txt, so it is never used.
+ *
+ * Links here point at Intern Insider's own page rather than the employer's ATS,
+ * so this source is ranked below the employer boards: where the same role is
+ * also on a company board, the direct copy wins and this one is dropped. It
+ * therefore only ever contributes roles nothing else found.
+ */
+const INTERN_INSIDER_SITEMAP = "https://interninsider.me/sitemap-seo/jobs-open";
+const II_TTL = 6 * 60 * 60 * 1000;
+let iiCache: { at: number; jobs: DetectedJob[] } | null = null;
+
+function deslug(s: string): string {
+  return s
+    .replace(/-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "") // trailing uuid
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .replace(/\bAi\b/g, "AI")
+    .replace(/\bMl\b/g, "ML")
+    .replace(/\bSwe\b/g, "SWE")
+    .replace(/\bSde\b/g, "SDE")
+    .replace(/\bIxp\b/g, "iXp")
+    .replace(/\b(Sap|Ibm|Aws|Hp|Ey|Pwc|Kpmg|Nvidia)\b/g, (w) =>
+      w.toLowerCase() === "nvidia" ? "NVIDIA" : w.toUpperCase(),
+    )
+    .trim();
+}
+
+export async function fetchInternInsider(): Promise<DetectedJob[]> {
+  if (iiCache && Date.now() - iiCache.at < II_TTL) return iiCache.jobs;
+
+  const res = await request(INTERN_INSIDER_SITEMAP, { timeoutMs: 30000, retries: 1 });
+  if (!res.ok || !res.body) return iiCache?.jobs ?? [];
+
+  const out: DetectedJob[] = [];
+  const re = /<loc>(.*?)<\/loc>\s*<lastmod>(.*?)<\/lastmod>/g;
+  for (let m = re.exec(res.body); m; m = re.exec(res.body)) {
+    const [, loc, lastmod] = m;
+    const slug = loc.replace("https://interninsider.me/internships/", "");
+    const parts = slug.split("/");
+    if (parts.length < 2) continue;
+
+    const company = deslug(parts[0]);
+    const role = deslug(parts[1]);
+    // Filter the raw slug too: de-slugging splits "masters" into "Master S",
+    // which slips past the graduate-only check that the raw text catches.
+    const rawRole = parts[1].replace(/-[0-9a-f-]{30,}$/i, "").replace(/-+/g, " ");
+    if (!isTargetRole(role) || !isTargetRole(rawRole)) continue;
+    if (!isBigTech(company)) continue; // their catalogue is mostly non-tech
+
+    out.push({
+      company,
+      role,
+      url: loc,
+      // lastmod is when the listing changed, not strictly when it was posted —
+      // close enough to order by, and the dedupe prefers a board's real date.
+      postedAt: iso(lastmod),
+      source: "interninsider",
+    });
+  }
+
+  iiCache = { at: Date.now(), jobs: out };
+  return out;
+}
+
+/* ---------------------------------------------------------------- 4. social */
 
 const SUBREDDITS = ["csMajors", "internships", "cscareerquestions", "developersIndia"];
 
@@ -545,6 +613,7 @@ export async function fetchEverything(): Promise<{ jobs: DetectedJob[]; report: 
   const families: Array<[string, () => Promise<DetectedJob[]>]> = [
     ["boards", fetchAllBoards],
     ["trackers", fetchAllTrackers],
+    ["interninsider", fetchInternInsider],
     ["reddit", fetchReddit],
     ["hackernews", fetchHackerNews],
   ];

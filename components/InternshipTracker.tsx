@@ -121,6 +121,7 @@ const SOURCE_LABEL: Record<string, string> = {
   workday: "Workday",
   amazon: "Amazon Jobs",
   tracker: "GitHub tracker",
+  interninsider: "Intern Insider",
   reddit: "Reddit",
   hackernews: "Hacker News",
   indeed: "Indeed",
@@ -132,6 +133,7 @@ const SOURCE_GROUP: Record<string, string> = {
   boards: "Employer boards",
   ats: "Employer boards",
   trackers: "GitHub trackers",
+  interninsider: "Intern Insider",
   reddit: "Reddit",
   hackernews: "Hacker News",
 };
