@@ -272,19 +272,22 @@ export async function fetchAllBoards(): Promise<DetectedJob[]> {
 
 /* ------------------------------------------- 2. community GitHub trackers */
 
+/**
+ * Curated trackers. Every URL here was verified to return a parseable table —
+ * community repos rot fast (branches renamed, repos deleted, README formats
+ * changed), and a 404 in this list is silent data loss. Use /HEAD/ rather than
+ * a branch name so a default-branch rename doesn't break the fetch.
+ */
 export const TRACKERS = [
-  "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/README.md",
-  "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/main/README.md",
-  "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/README.md",
-  "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/main/README.md",
-  "https://raw.githubusercontent.com/cvrve/Summer2027-Internships/main/README.md",
-  "https://raw.githubusercontent.com/Ouckah/Summer2027-Internships/main/README.md",
-  "https://raw.githubusercontent.com/sndsh404/summer-2027-internships/main/README.md",
-  "https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/main/INTERN.md",
-  "https://raw.githubusercontent.com/speedyapply/2026-SWE-College-Jobs/main/INTERN.md",
-  "https://raw.githubusercontent.com/speedyapply/2026-AI-College-Jobs/main/INTERN.md",
-  "https://raw.githubusercontent.com/coderQuad/New-Grad-Positions/main/README.md",
-  "https://raw.githubusercontent.com/ReaVNaiL/New-Grad-2024/main/README.md",
+  // SimplifyJobs is the largest list and renders HTML tables, not pipe tables.
+  "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/HEAD/README.md",
+  "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/HEAD/README.md",
+  "https://raw.githubusercontent.com/zapplyjobs/Internships-2027/HEAD/README.md",
+  "https://raw.githubusercontent.com/Chieler/Summer-2027-SWE-Internships/HEAD/README.md",
+  "https://raw.githubusercontent.com/sndsh404/summer-2027-internships/HEAD/README.md",
+  "https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/HEAD/INTERN_INTL.md",
+  "https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/HEAD/NEW_GRAD_USA.md",
+  "https://raw.githubusercontent.com/ReaVNaiL/New-Grad-2024/HEAD/README.md",
 ];
 
 /* ---------------------------------------------- tracker auto-discovery ----
@@ -380,10 +383,57 @@ async function trackerUrls(): Promise<string[]> {
   return [...new Set([...TRACKERS, ...discovered.urls])];
 }
 
+/**
+ * Several trackers — including SimplifyJobs, by far the largest — render their
+ * listings as HTML tables rather than markdown pipe tables, so the pipe parser
+ * silently returns nothing for them. Same columns, different markup.
+ */
+function parseTrackerHtmlTable(html: string): DetectedJob[] {
+  const out: DetectedJob[] = [];
+  let lastCompany = "";
+  for (const row of html.match(/<tr>[\s\S]*?<\/tr>/g) || []) {
+    const cells = [...row.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((m) => m[1]);
+    if (cells.length < 4) continue;
+
+    let company = stripTags(cells[0]);
+    if (!company || company === "↳" || cells[0].includes("↳")) company = lastCompany;
+    else lastCompany = company;
+    if (!company || /^company$/i.test(company)) continue;
+
+    const role = stripTags(cells[1]);
+    if (!role || !TECH_RE.test(role) || !isUndergradRole(role)) continue;
+    if (STALE_YEAR_RE.test(role) && !TARGET_YEAR_RE.test(role)) continue;
+
+    // Closed roles render a lock/🔒 instead of an anchor.
+    const href = cells[3].match(/href="([^"]+)"/);
+    if (!href) continue;
+    if (!isBigTech(company)) continue;
+
+    // Last column is an age like "0d" / "13d" — good enough for a posted date.
+    const age = stripTags(cells[4] || "").match(/^(\d+)\s*d/i);
+    const postedAt = age ? new Date(Date.now() - Number(age[1]) * 864e5).toISOString() : undefined;
+
+    out.push({
+      company,
+      role,
+      location: stripTags(cells[2]),
+      url: cleanUrl(href[1]),
+      postedAt,
+      source: "tracker",
+    });
+  }
+  return out;
+}
+
 export async function fetchAllTrackers(): Promise<DetectedJob[]> {
   const urls = await trackerUrls();
   const pages = await pool(urls, 8, async (u) => (await request(u)).body);
-  return pages.filter(Boolean).flatMap((md) => parseTrackerTable(md as string));
+  return pages.filter(Boolean).flatMap((body) => {
+    const md = body as string;
+    const rows = parseTrackerTable(md);
+    // Fall back to the HTML-table shape when there are no pipe rows.
+    return rows.length > 0 ? rows : parseTrackerHtmlTable(md);
+  });
 }
 
 /** How many tracker READMEs are currently being watched (for the UI). */

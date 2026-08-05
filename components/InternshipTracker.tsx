@@ -927,6 +927,40 @@ function AddRoleForm({ onCancel, onAdded }: { onCancel: () => void; onAdded: () 
   const [via, setVia] = useState("zero2sudo IG");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [resolved, setResolved] = useState<string | null>(null);
+  const [postedAt, setPostedAt] = useState<string | undefined>();
+  const [location, setLocation] = useState<string | undefined>();
+
+  /** Pull the real title/company/date straight from the employer's ATS. */
+  async function resolve(link: string) {
+    if (!link.trim()) return;
+    setResolving(true);
+    setErr(null);
+    setResolved(null);
+    try {
+      const res = await fetch("/api/internships/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: link }),
+      });
+      const j = await res.json();
+      if (j.ok) {
+        setCompany(j.job.company || "");
+        setRole(j.job.role || "");
+        setUrl(j.job.url || link);
+        setLocation(j.job.location);
+        setPostedAt(j.job.postedAt);
+        setResolved(j.job.ats ? `read from ${j.job.ats}` : "read from page");
+      } else {
+        setErr(j.error || "Couldn't read that link — fill it in manually.");
+      }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setResolving(false);
+    }
+  }
 
   async function save() {
     if (!company.trim() || !role.trim()) {
@@ -939,7 +973,7 @@ function AddRoleForm({ onCancel, onAdded }: { onCancel: () => void; onAdded: () 
       const res = await fetch("/api/internships", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ add: { company, role, url, via } }),
+        body: JSON.stringify({ add: { company, role, url, via, location, postedAt } }),
       });
       const j = await res.json();
       if (j.ok) onAdded();
@@ -962,10 +996,39 @@ function AddRoleForm({ onCancel, onAdded }: { onCancel: () => void; onAdded: () 
           ✕
         </button>
       </div>
+
+      {/* Paste-a-link first: the fastest path from a zero2sudo post to a
+          tracked role, since the ATS knows the real title and posting date. */}
+      <div className="mb-2 flex flex-wrap gap-2">
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onPaste={(e) => {
+            const text = e.clipboardData.getData("text");
+            if (/^https?:\/\//i.test(text)) setTimeout(() => resolve(text), 0);
+          }}
+          onKeyDown={(e) => e.key === "Enter" && resolve(url)}
+          placeholder="Paste the apply link — Jarvis fills in the rest"
+          className={`${field} min-w-[320px] flex-1`}
+        />
+        <button
+          onClick={() => resolve(url)}
+          disabled={resolving || !url.trim()}
+          className="rounded-md border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--text)] disabled:opacity-40"
+        >
+          {resolving ? "Reading…" : "Read link"}
+        </button>
+        {resolved && (
+          <span className="self-center text-[11px]" style={{ color: "var(--good)" }}>
+            ✓ {resolved}
+            {postedAt ? ` · posted ${new Date(postedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
+          </span>
+        )}
+      </div>
+
       <div className="flex flex-wrap gap-2">
         <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Company *" className={`${field} w-40`} />
-        <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Role *" className={`${field} min-w-[220px] flex-1`} />
-        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Apply link (optional)" className={`${field} min-w-[200px] flex-1`} />
+        <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Role *" className={`${field} min-w-[240px] flex-1`} />
         <input value={via} onChange={(e) => setVia(e.target.value)} placeholder="Found via" className={`${field} w-40`} title="Where you saw it" />
         <button
           onClick={save}
