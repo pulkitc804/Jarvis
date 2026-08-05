@@ -1,5 +1,6 @@
 import { isUndergradRole } from "./internships";
 import { isTargetEmployer } from "./fortune500";
+import { isEarlyCareerProgram, type OpportunityKind } from "./earlyCareer";
 import { getJson, pool, postJson, request } from "./scraperCore";
 
 /**
@@ -26,6 +27,8 @@ export type DetectedJob = {
   /** When Jarvis first saw it (ISO) — set on write. */
   firstSeen?: string;
   source?: string;
+  /** internship | program — programs get their own section. */
+  kind?: OpportunityKind;
 };
 
 /* ------------------------------------------------------------------ filters */
@@ -45,6 +48,22 @@ export function isTargetRole(title: string): boolean {
   if (!isUndergradRole(title)) return false;
   if (TARGET_YEAR_RE.test(title)) return true; // explicit 2027 always wins
   return !STALE_YEAR_RE.test(title); // undated is fine; an older cycle is not
+}
+
+/**
+ * Bucket a posting, or reject it. Programs are checked first: several genuinely
+ * are internships too (Google STEP is an "Intern" title), and when a posting is
+ * both, the program framing is the more useful one to file it under.
+ */
+export function classify(title: string, company = ""): OpportunityKind | null {
+  if (!title) return null;
+  if (isEarlyCareerProgram(title, company)) {
+    // Programs skip the 2027 requirement — they run on their own calendars —
+    // but a clearly past cycle is still stale.
+    if (STALE_YEAR_RE.test(title) && !TARGET_YEAR_RE.test(title)) return null;
+    return "program";
+  }
+  return isTargetRole(title) ? "internship" : null;
 }
 
 function cleanUrl(u: string): string {
@@ -179,8 +198,10 @@ async function fetchBoard(b: Board): Promise<DetectedJob[]> {
   if (b.ats === "greenhouse") {
     const d = await getJson<{ jobs?: GhJob[] }>(`https://boards-api.greenhouse.io/v1/boards/${b.slug}/jobs`);
     for (const j of d?.jobs || []) {
-      if (!isTargetRole(j.title)) continue;
+      const kind = classify(j.title, b.company);
+      if (!kind) continue;
       out.push({
+        kind,
         company: b.company,
         role: stripTags(j.title),
         url: cleanUrl(j.absolute_url),
@@ -192,8 +213,10 @@ async function fetchBoard(b: Board): Promise<DetectedJob[]> {
   } else if (b.ats === "lever") {
     const d = await getJson<LeverJob[]>(`https://api.lever.co/v0/postings/${b.slug}?mode=json`);
     for (const j of Array.isArray(d) ? d : []) {
-      if (!isTargetRole(j.text)) continue;
+      const kind = classify(j.text, b.company);
+      if (!kind) continue;
       out.push({
+        kind,
         company: b.company,
         role: stripTags(j.text),
         url: cleanUrl(j.hostedUrl),
@@ -206,8 +229,10 @@ async function fetchBoard(b: Board): Promise<DetectedJob[]> {
     const d = await getJson<{ jobs?: AshbyJob[] }>(`https://api.ashbyhq.com/posting-api/job-board/${b.slug}`);
     for (const j of d?.jobs || []) {
       if (j.isListed === false) continue;
-      if (!isTargetRole(j.title)) continue;
+      const kind = classify(j.title, b.company);
+      if (!kind) continue;
       out.push({
+        kind,
         company: b.company,
         role: stripTags(j.title),
         url: cleanUrl(j.jobUrl),
@@ -227,8 +252,10 @@ async function fetchBoard(b: Board): Promise<DetectedJob[]> {
         searchText: q,
       });
       for (const j of d?.jobPostings || []) {
-        if (!isTargetRole(j.title)) continue;
+        const kind = classify(j.title, b.company);
+        if (!kind) continue;
         out.push({
+          kind,
           company: b.company,
           role: stripTags(j.title),
           url: `https://${b.host}/en-US/${b.site}${j.externalPath}`,
@@ -248,8 +275,10 @@ async function fetchBoard(b: Board): Promise<DetectedJob[]> {
     );
     for (const d of pages) {
       for (const j of d?.jobs || []) {
-        if (!isTargetRole(j.title)) continue;
+        const kind = classify(j.title, "Amazon");
+        if (!kind) continue;
         out.push({
+          kind,
           company: "Amazon",
           role: stripTags(j.title),
           url: `https://www.amazon.jobs${j.job_path}`,
@@ -357,12 +386,12 @@ function parseTrackerTable(md: string): DetectedJob[] {
     const role = stripTags(roleRaw);
     // These tables are already internship-scoped, so don't demand the literal
     // word "intern" in every row — but the rest of the filters still apply.
-    if (!TECH_RE.test(role) || !isUndergradRole(role)) continue;
-    if (STALE_YEAR_RE.test(role) && !TARGET_YEAR_RE.test(role)) continue;
+    const kind = classify(role, company) ?? (TECH_RE.test(role) && isUndergradRole(role) && !(STALE_YEAR_RE.test(role) && !TARGET_YEAR_RE.test(role)) ? "internship" : null);
+    if (!kind) continue;
     const href = applyRaw.match(/href="([^"]+)"/) || applyRaw.match(/\((https?:\/\/[^)]+)\)/);
     if (!href) continue; // closed roles carry no apply link
     if (!isTargetEmployer(company)) continue;
-    out.push({ company, role, location: stripTags(locRaw), url: cleanUrl(href[1]), source: "tracker" });
+    out.push({ kind, company, role, location: stripTags(locRaw), url: cleanUrl(href[1]), source: "tracker" });
   }
   return out;
 }
@@ -402,8 +431,9 @@ function parseTrackerHtmlTable(html: string): DetectedJob[] {
     if (!company || /^company$/i.test(company)) continue;
 
     const role = stripTags(cells[1]);
-    if (!role || !TECH_RE.test(role) || !isUndergradRole(role)) continue;
-    if (STALE_YEAR_RE.test(role) && !TARGET_YEAR_RE.test(role)) continue;
+    if (!role) continue;
+    const kind = classify(role, company) ?? (TECH_RE.test(role) && isUndergradRole(role) && !(STALE_YEAR_RE.test(role) && !TARGET_YEAR_RE.test(role)) ? "internship" : null);
+    if (!kind) continue;
 
     // Closed roles render a lock/🔒 instead of an anchor.
     const href = cells[3].match(/href="([^"]+)"/);
@@ -415,6 +445,7 @@ function parseTrackerHtmlTable(html: string): DetectedJob[] {
     const postedAt = age ? new Date(Date.now() - Number(age[1]) * 864e5).toISOString() : undefined;
 
     out.push({
+      kind,
       company,
       role,
       location: stripTags(cells[2]),
@@ -492,10 +523,12 @@ export async function fetchInternInsider(): Promise<DetectedJob[]> {
     // Filter the raw slug too: de-slugging splits "masters" into "Master S",
     // which slips past the graduate-only check that the raw text catches.
     const rawRole = parts[1].replace(/-[0-9a-f-]{30,}$/i, "").replace(/-+/g, " ");
-    if (!isTargetRole(role) || !isTargetRole(rawRole)) continue;
+    const kind = classify(role, company);
+    if (!kind || (kind === "internship" && !isTargetRole(rawRole))) continue;
     if (!isTargetEmployer(company)) continue; // their catalogue is mostly non-tech
 
     out.push({
+      kind,
       company,
       role,
       url: loc,
@@ -539,13 +572,16 @@ function parseRedditRss(xml: string): DetectedJob[] {
   const out: DetectedJob[] = [];
   for (const e of xml.split("<entry>").slice(1)) {
     const title = stripTags(decodeEntities(e.match(/<title>([\s\S]*?)<\/title>/)?.[1] || ""));
-    if (!title || !isTargetRole(title) || QUESTION_RE.test(title)) continue;
+    if (!title || QUESTION_RE.test(title)) continue;
+    const kind = classify(title);
+    if (!kind) continue;
     const content = decodeEntities(e.match(/<content[^>]*>([\s\S]*?)<\/content>/)?.[1] || "");
     const applyLink = content.match(APPLY_HOST_RE)?.[0];
     if (!applyLink) continue;
     const company = guessCompany(`${title} ${applyLink}`);
     if (!company) continue;
     out.push({
+      kind,
       company,
       role: title.slice(0, 160),
       url: cleanUrl(applyLink),
@@ -588,12 +624,15 @@ export async function fetchHackerNews(): Promise<DetectedJob[]> {
   for (const d of pages) {
     for (const h of d?.hits || []) {
       const text = stripTags(decodeEntities(h.comment_text || ""));
-      if (!text || !isTargetRole(text)) continue;
+      if (!text) continue;
+      const kind = classify(text);
+      if (!kind) continue;
       const link = text.match(APPLY_HOST_RE)?.[0];
       if (!link) continue; // same rule as Reddit
       const company = guessCompany(`${text.slice(0, 300)} ${link}`);
       if (!company) continue;
       out.push({
+        kind,
         company,
         role: text.replace(/\s+/g, " ").slice(0, 120),
         url: cleanUrl(link),

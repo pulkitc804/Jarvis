@@ -5,6 +5,7 @@ import { getDetectedJobs } from "./internshipFetcher";
 import { readManualJobs } from "./manualJobs";
 import { getLinkHealth, type LinkVerdict } from "./linkHealth";
 import { isFortune500, isTargetEmployer } from "./fortune500";
+import type { OpportunityKind } from "./earlyCareer";
 
 /**
  * Internship tracker data layer.
@@ -124,6 +125,8 @@ type ScraperJob = {
   postedAt?: string;
   /** Which feed surfaced it: greenhouse | lever | ashby | tracker | reddit | … */
   source?: string;
+  /** internship | program — programs live in their own section. */
+  kind?: OpportunityKind;
   /** Set for hand-entered roles (see lib/manualJobs.ts). */
   manual?: boolean;
   via?: string;
@@ -174,6 +177,8 @@ export type JobStatus = {
 export type Internship = Omit<ScraperJob, "firstSeen" | "postedAt" | "score" | "worthTailoring" | "scoreReason" | "tailoredResume"> & {
   id: string;
   bigTech: boolean;
+  /** internship (default) | program */
+  kind: OpportunityKind;
   /** On the Fortune 500 list. */
   f500: boolean;
   /** F500 or a notable private employer (SpaceX, Palantir, OpenAI, …). */
@@ -315,6 +320,7 @@ export function listInternships(): { internships: Internship[]; scraperConnected
     return {
       ...j,
       company: canonicalCompany(j.company),
+      kind: j.kind ?? "internship",
       id,
       bigTech: isBigTech(j.company),
       f500: isFortune500(j.company),

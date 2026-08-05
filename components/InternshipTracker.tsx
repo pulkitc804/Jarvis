@@ -68,6 +68,8 @@ type Internship = {
 type Resp = {
   internships: Internship[];
   total: number;
+  kind?: "internship" | "program";
+  kindCounts?: { internship: number; program: number };
   bigTechCount: number;
   f500Count: number;
   appliedCount: number;
@@ -147,17 +149,26 @@ function hoursUntil(ms: number) {
   return Math.round((ms - Date.now()) / 3_600_000);
 }
 
-const ARCHIVE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
+const DAY = 24 * 60 * 60 * 1000;
+/**
+ * Internship postings move fast and go stale in days. Fellowships and
+ * early-career programs are rarer, open on their own calendars and stay open
+ * for weeks — archiving those after 3 days would empty the section.
+ */
+const ARCHIVE_AFTER: Record<"internship" | "program", number> = {
+  internship: 3 * DAY,
+  program: 45 * DAY,
+};
 /** The date the ledger sorts and displays by: real publish time when known. */
 function effectiveDate(j: { postedAt: number | null; firstSeen: number }) {
   return j.postedAt ?? j.firstSeen;
 }
-/** Older than 3 days — stale enough to move out of the working view. */
-function isArchived(j: { postedAt: number | null; firstSeen: number }) {
-  return Date.now() - effectiveDate(j) > ARCHIVE_AFTER_MS;
+function isArchived(j: { postedAt: number | null; firstSeen: number }, kind: "internship" | "program") {
+  return Date.now() - effectiveDate(j) > ARCHIVE_AFTER[kind];
 }
 
-export function InternshipTracker() {
+export function InternshipTracker({ kind = "internship" }: { kind?: "internship" | "program" } = {}) {
+  const isPrograms = kind === "program";
   const [data, setData] = useState<Resp | null>(null);
   const [bigTechOnly, setBigTechOnly] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -182,13 +193,13 @@ export function InternshipTracker() {
     async (force = false) => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/internships?all=${bigTechOnly ? 0 : 1}${force ? "&refresh=1" : ""}`, { cache: "no-store" });
+        const res = await fetch(`/api/internships?kind=${kind}&all=${bigTechOnly ? 0 : 1}${force ? "&refresh=1" : ""}`, { cache: "no-store" });
         setData(await res.json());
       } finally {
         setLoading(false);
       }
     },
-    [bigTechOnly],
+    [bigTechOnly, kind],
   );
 
   // Anything Jarvis detected after your last manual refresh counts as "new" —
@@ -324,11 +335,11 @@ export function InternshipTracker() {
   // A role you're actually working stays in the live view however old it is —
   // archiving is for postings that went stale untouched, not your pipeline.
   const stillActive = (j: Internship) => j.stage !== "not_applied" || j.favorite;
-  const archivedCount = allJobs.filter((j) => !j.hidden && isArchived(j) && !stillActive(j)).length;
+  const archivedCount = allJobs.filter((j) => !j.hidden && isArchived(j, kind) && !stillActive(j)).length;
 
   const jobs = allJobs
     .filter((j) => (showHidden ? j.hidden : !j.hidden))
-    .filter((j) => (showArchive ? isArchived(j) && !stillActive(j) : !isArchived(j) || stillActive(j)))
+    .filter((j) => (showArchive ? isArchived(j, kind) && !stillActive(j) : !isArchived(j, kind) || stillActive(j)))
     .filter((j) => !favOnly || j.favorite)
     .filter((j) => !only2027 || /\b2027\b/.test(j.role))
     .filter((j) => stageFilter === "all" || j.stage === stageFilter)
@@ -364,7 +375,16 @@ export function InternshipTracker() {
         <Link href="/" className="rounded-lg border border-[var(--border)] px-3 py-2 text-[13px] text-[var(--muted)] transition hover:text-[var(--accent)] hover:border-[var(--border-strong)]">
           ← Dashboard
         </Link>
-        <h1 className="text-xl font-semibold text-[var(--text)]">Internship Tracker</h1>
+        <h1 className="text-xl font-semibold text-[var(--text)]">{isPrograms ? "Fellowships & Programs" : "Internship Tracker"}</h1>
+        <Link
+          href={isPrograms ? "/internships" : "/programs"}
+          className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[12px] text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--text)]"
+          title={isPrograms ? "Standard 2027 internships" : "Fellowships and freshman/sophomore programs"}
+        >
+          {isPrograms
+            ? `Internships (${data?.kindCounts?.internship ?? 0}) →`
+            : `Fellowships & programs (${data?.kindCounts?.program ?? 0}) →`}
+        </Link>
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setShowAdd((v) => !v)}
@@ -465,7 +485,7 @@ export function InternshipTracker() {
                 ? { borderColor: "var(--accent)", background: "color-mix(in srgb, var(--accent) 14%, transparent)", color: "var(--accent)" }
                 : { borderColor: "var(--border)", color: "var(--faint)" }
             }
-            title="Postings older than 3 days. Anything you've applied to or starred stays in the live view."
+            title={`${isPrograms ? "Programs older than 45 days" : "Postings older than 3 days"}. Anything you've applied to or starred stays in the live view.`}
           >
             {showArchive ? "← Back to live" : `Archive (${archivedCount})`}
           </button>
@@ -580,7 +600,7 @@ export function InternshipTracker() {
           </div>
           <div className="mt-1 max-w-md text-[12px] text-[var(--muted)]">
             {showArchive
-              ? "Postings older than 3 days land here, unless you've applied to or starred them."
+              ? `${isPrograms ? "Programs older than 45 days" : "Postings older than 3 days"} land here, unless you've applied to or starred them.`
               : "Jarvis adds undergrad 2027 SWE / AI-ML / Data roles as it finds them. Switch to “Showing all” to include employers outside the F500."}
           </div>
         </div>

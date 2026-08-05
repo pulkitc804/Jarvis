@@ -5,6 +5,7 @@ import { TasksWidget } from "@/components/widgets/TasksWidget";
 import { MeetingsWidget } from "@/components/widgets/MeetingsWidget";
 import { EmailWidget } from "@/components/widgets/EmailWidget";
 import { InternshipsWidget } from "@/components/widgets/InternshipsWidget";
+import { ProgramsWidget } from "@/components/widgets/ProgramsWidget";
 import { DigestWidget } from "@/components/widgets/DigestWidget";
 import { ReferralsWidget } from "@/components/widgets/ReferralsWidget";
 import { GithubWidget } from "@/components/widgets/GithubWidget";
@@ -18,6 +19,7 @@ export default function Home() {
         <SessionLimitWidget />
         <TasksWidget />
         <InternshipsWidget />
+        <ProgramsWidget />
         <DigestWidget />
         <ReferralsWidget />
         <GithubWidget />

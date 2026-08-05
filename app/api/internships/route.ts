@@ -27,9 +27,19 @@ export async function GET(request: Request) {
   // roles appear on demand instead of only on the ~5-min background cadence.
   if (url.searchParams.get("refresh") === "1") await refreshDetected();
   const targetOnly = url.searchParams.get("all") !== "1";
-  const { internships, scraperConnected, scraperFile, detectedCount } = listInternships();
+  // ?kind=program serves the fellowships / early-career section; default is
+  // standard internships. Counts for both are always returned so each page can
+  // link to the other.
+  const kind = url.searchParams.get("kind") === "program" ? "program" : "internship";
+  const everything = listInternships().internships;
+  const { scraperConnected, scraperFile, detectedCount } = listInternships();
+  const internships = everything.filter((i) => i.kind === kind);
   const bigTechCount = internships.filter((i) => i.targetEmployer).length;
   const f500Count = internships.filter((i) => i.f500).length;
+  const kindCounts = {
+    internship: everything.filter((i) => i.kind === "internship").length,
+    program: everything.filter((i) => i.kind === "program").length,
+  };
   // Default view is F500 + notable private employers. Anything you've engaged
   // with stays visible regardless of tier, so a role you applied to never
   // vanishes because its employer isn't on a list.
@@ -39,6 +49,8 @@ export async function GET(request: Request) {
   return Response.json({
     internships: shown,
     total: internships.length,
+    kind,
+    kindCounts,
     bigTechCount,
     f500Count,
     appliedCount: internships.filter((i) => i.applied).length,
