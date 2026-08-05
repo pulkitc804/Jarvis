@@ -208,19 +208,35 @@ function mergedJobs(): ScraperJob[] {
     const id = jobId(j);
     byId.set(id, { ...byId.get(id), ...j });
   }
-  // Manual entries win outright — you typed them, so nothing should rewrite them.
+  // Manual entries win on identity — they hold your stage/deadline state, which
+  // is keyed by their own id. But a role you added by hand is often the same
+  // posting a feed later finds on its own, so fold the two together instead of
+  // showing it twice: keep the manual row, enrich it with whatever the feed knows.
+  const roleKey = (company: string, role: string) =>
+    `${normalizeCompany(company)}::${role.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()}`;
+  const scrapedByRole = new Map<string, [string, ScraperJob]>();
+  for (const [id, j] of byId) scrapedByRole.set(roleKey(j.company, j.role), [id, j]);
+
   for (const m of readManualJobs()) {
+    const dup = scrapedByRole.get(roleKey(m.company, m.role));
+    if (dup) byId.delete(dup[0]); // drop the feed copy; the manual row replaces it
+    const feed = dup?.[1];
     byId.set(m.id, {
       company: m.company,
       role: m.role,
-      url: m.url,
-      location: m.location,
-      postedAt: m.postedAt,
+      // Prefer the employer-board URL when a feed found the same posting.
+      url: feed?.url || m.url,
+      location: m.location || feed?.location,
+      postedAt: feed?.postedAt || m.postedAt,
       firstSeen: m.addedAt,
       source: "manual",
       manual: true,
       via: m.via,
       manualId: m.id,
+      // carry over anything the scraper scored
+      score: feed?.score,
+      worthTailoring: feed?.worthTailoring,
+      scoreReason: feed?.scoreReason,
     } as ScraperJob);
   }
   return [...byId.values()];

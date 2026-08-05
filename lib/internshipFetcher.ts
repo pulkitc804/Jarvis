@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isUndergradRole } from "./internships";
-import { BOARD_COUNT, fetchEverything, type DetectedJob, type SourceReport } from "./jobSources";
+import { BOARD_COUNT, fetchEverything, trackerCount, type DetectedJob, type SourceReport } from "./jobSources";
 import { cachedUrlCount } from "./scraperCore";
 
 /**
@@ -67,6 +67,8 @@ export type FetcherState = {
   report: SourceReport[];
   /** Employer boards watched directly, and total roles scanned last pass. */
   boardCount?: number;
+  /** Tracker READMEs watched, including auto-discovered ones. */
+  trackerCount?: number;
   scanned?: number;
   ms?: number;
 };
@@ -117,6 +119,7 @@ export async function refreshDetected(): Promise<number> {
       lastAdded: added,
       report,
       boardCount: BOARD_COUNT,
+      trackerCount: trackerCount(),
       scanned: jobs.length,
       ms: Date.now() - startedAt,
     } satisfies FetcherState);
@@ -133,10 +136,12 @@ function nowIso(): string {
 
 /**
  * Start the background poll loop once (the server is long-running, so it
- * persists). 3 min is a good floor: ATS endpoints are CDN-cached for ~1-2 min
- * and GitHub's raw CDN for ~5, so polling faster mostly re-reads cached bytes.
+ * persists). 90s is about the useful floor — ATS endpoints are CDN-cached for
+ * roughly a minute and GitHub's raw CDN for a few, so polling faster mostly
+ * re-reads identical bytes. Conditional GET keeps unchanged boards nearly free,
+ * which is what makes this cadence affordable at 60+ boards.
  */
-export function ensureFetcherRunning(intervalMs = 3 * 60 * 1000) {
+export function ensureFetcherRunning(intervalMs = 90 * 1000) {
   if (started) return;
   started = true;
   void refreshDetected();

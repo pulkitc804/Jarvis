@@ -122,6 +122,8 @@ export const BOARDS: Board[] = [
   { company: "Betterment", ats: "greenhouse", slug: "betterment" },
   { company: "Cockroach Labs", ats: "greenhouse", slug: "cockroachlabs" },
   { company: "Squarespace", ats: "greenhouse", slug: "squarespace" },
+  { company: "SpaceX", ats: "greenhouse", slug: "spacex" },
+  { company: "Chicago Trading Company", ats: "greenhouse", slug: "chicagotradingcampus" },
   // Lever
   { company: "Palantir", ats: "lever", slug: "palantir" },
   { company: "Spotify", ats: "lever", slug: "spotify" },
@@ -285,6 +287,56 @@ export const TRACKERS = [
   "https://raw.githubusercontent.com/ReaVNaiL/New-Grad-2024/main/README.md",
 ];
 
+/* ---------------------------------------------- tracker auto-discovery ----
+ * A hardcoded tracker list goes stale: new community repos appear constantly
+ * and old ones get abandoned. GitHub's search API can enumerate them by
+ * "recently updated", so Jarvis finds new trackers on its own.
+ *
+ * Search is rate-limited (10 req/min unauthenticated), so the discovered list
+ * is cached to disk and refreshed a few times a day; READMEs are then fetched
+ * on the normal fast cadence.
+ */
+
+type RepoHit = { full_name: string; stargazers_count: number; updated_at: string; archived?: boolean; fork?: boolean };
+
+const DISCOVERY_QUERIES = [
+  "Summer+2027+internships+in%3Aname%2Cdescription",
+  "2027+internship+list+in%3Aname%2Cdescription",
+  "SWE+internships+2027+in%3Aname%2Cdescription",
+];
+
+/** Repo names that look like an internship listing rather than someone's app. */
+const REPO_NAME_RE = /intern|jobs|new.?grad|hiring/i;
+
+export async function discoverTrackerRepos(): Promise<string[]> {
+  const found = new Map<string, RepoHit>();
+  for (const q of DISCOVERY_QUERIES) {
+    const d = await getJson<{ items?: RepoHit[] }>(
+      `https://api.github.com/search/repositories?q=${q}&sort=updated&order=desc&per_page=30`,
+      { headers: { accept: "application/vnd.github+json" }, retries: 1 },
+    );
+    for (const r of d?.items || []) {
+      if (r.archived || r.fork) continue;
+      if (!REPO_NAME_RE.test(r.full_name)) continue;
+      // Skip the long tail of personal trackers with no listings in them.
+      if (r.stargazers_count < 3) continue;
+      found.set(r.full_name, r);
+    }
+  }
+  return [...found.values()]
+    .sort((a, b) => b.stargazers_count - a.stargazers_count)
+    .slice(0, 25)
+    .map((r) => r.full_name);
+}
+
+/** Candidate README paths — /HEAD/ resolves whatever the default branch is. */
+export function readmeUrlsFor(repo: string): string[] {
+  return [
+    `https://raw.githubusercontent.com/${repo}/HEAD/README.md`,
+    `https://raw.githubusercontent.com/${repo}/HEAD/INTERN.md`,
+  ];
+}
+
 function parseTrackerTable(md: string): DetectedJob[] {
   const out: DetectedJob[] = [];
   let lastCompany = "";
@@ -311,9 +363,32 @@ function parseTrackerTable(md: string): DetectedJob[] {
   return out;
 }
 
+/** Discovered repo list, refreshed on a slow cadence and cached in memory. */
+let discovered: { at: number; urls: string[] } | null = null;
+const DISCOVERY_TTL = 6 * 60 * 60 * 1000;
+
+async function trackerUrls(): Promise<string[]> {
+  if (!discovered || Date.now() - discovered.at > DISCOVERY_TTL) {
+    try {
+      const repos = await discoverTrackerRepos();
+      discovered = { at: Date.now(), urls: repos.flatMap(readmeUrlsFor) };
+    } catch {
+      discovered = discovered ?? { at: Date.now(), urls: [] };
+    }
+  }
+  // Curated list first, then whatever discovery turned up; de-duplicated.
+  return [...new Set([...TRACKERS, ...discovered.urls])];
+}
+
 export async function fetchAllTrackers(): Promise<DetectedJob[]> {
-  const pages = await pool(TRACKERS, 6, async (u) => (await request(u)).body);
+  const urls = await trackerUrls();
+  const pages = await pool(urls, 8, async (u) => (await request(u)).body);
   return pages.filter(Boolean).flatMap((md) => parseTrackerTable(md as string));
+}
+
+/** How many tracker READMEs are currently being watched (for the UI). */
+export function trackerCount(): number {
+  return new Set([...TRACKERS, ...(discovered?.urls || [])]).size;
 }
 
 /* ---------------------------------------------------------------- 3. social */
