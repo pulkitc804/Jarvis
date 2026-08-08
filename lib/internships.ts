@@ -83,6 +83,7 @@ const CANONICAL: Array<[RegExp, string]> = [
   [/^raytheon\b|^rtx\b/i, "RTX"],
   [/^susquehanna\b/i, "Susquehanna"],
   [/^(the )?home depot\b/i, "Home Depot"],
+  [/^johnson\s*&?\s*johnson\b|^j\s*&\s*j\b/i, "Johnson & Johnson"],
   // NB: "Citadel" and "Citadel Securities" are deliberately NOT merged —
   // the hedge fund and the market maker hire separately.
 ];
@@ -269,8 +270,11 @@ function mergedJobs(): ScraperJob[] {
   // is keyed by their own id. But a role you added by hand is often the same
   // posting a feed later finds on its own, so fold the two together instead of
   // showing it twice: keep the manual row, enrich it with whatever the feed knows.
+  // canonicalCompany, not normalizeCompany: the latter keeps "&", so
+  // "Johnson & Johnson" and "Johnson Johnson" hashed differently and the
+  // aggregator copy survived beside the manual one.
   const roleKey = (company: string, role: string) =>
-    `${normalizeCompany(company)}::${role.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()}`;
+    `${canonicalCompany(company).toLowerCase()}::${role.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()}`;
   const scrapedByRole = new Map<string, [string, ScraperJob]>();
   for (const [id, j] of byId) scrapedByRole.set(roleKey(j.company, j.role), [id, j]);
 
@@ -281,8 +285,13 @@ function mergedJobs(): ScraperJob[] {
     byId.set(m.id, {
       company: m.company,
       role: m.role,
-      // Prefer the employer-board URL when a feed found the same posting.
-      url: feed?.url || m.url,
+      // Prefer the feed's URL only when it comes from the employer's own board.
+      // An aggregator link is worse than the one you pasted, which is usually
+      // the real application page.
+      url:
+        feed?.url && ["greenhouse", "lever", "ashby", "workday", "amazon"].includes(feed.source || "")
+          ? feed.url
+          : m.url || feed?.url || "",
       location: m.location || feed?.location,
       postedAt: feed?.postedAt || m.postedAt,
       firstSeen: m.addedAt,

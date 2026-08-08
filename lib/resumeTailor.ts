@@ -25,7 +25,16 @@ export function focusFor(role: string, company = ""): Focus {
   const isInfra = /\b(infra|infrastructure|platform|devops|sre|site reliability|distributed|backend|systems|cloud)\b/.test(t);
   const isMobile = /\b(ios|android|mobile|swift|kotlin|app)\b/.test(t) || /\bapple\b/.test(t);
   const isData = /\b(data engineer|analytics|data analyst|etl|warehouse)\b/.test(t);
+  // Health / medical-device employers ask for demonstrated interest in
+  // healthcare, and the Guardian project (on-device fall detection for elderly
+  // users) is the honest answer — so lead with it.
+  const isHealth =
+    /\b(health|healthcare|medtech|medical|clinical|patient|biotech|pharma|device)\b/.test(t) ||
+    /\b(johnson|medtronic|stryker|abbott|baxter|boston scientific|zimmer|becton|philips|ge healthcare|epic|cerner)\b/.test(t);
 
+  // Health is checked before ML: a "Machine Learning Intern" at a medical
+  // device company still wants the healthcare project up front.
+  if (isHealth) return { order: ["Languages", "Frameworks & Tools", "Practices", "ML & AI", "Familiar", "Awards & Orgs"], preferProject: "guardian" };
   if (isML) return { order: ["ML & AI", "Languages", "Frameworks & Tools", "Practices", "Familiar", "Awards & Orgs"], preferProject: "scarletai" };
   if (isInfra) return { order: ["Frameworks & Tools", "Languages", "Practices", "ML & AI", "Familiar", "Awards & Orgs"] };
   if (isMobile) return { order: ["Languages", "Familiar", "Frameworks & Tools", "ML & AI", "Practices", "Awards & Orgs"], preferProject: "guardian" };
