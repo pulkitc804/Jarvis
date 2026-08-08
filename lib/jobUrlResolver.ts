@@ -102,6 +102,30 @@ export async function resolveJobUrl(rawUrl: string): Promise<ResolvedJob | { err
     }
   }
 
+  // ── Eightfold (Microsoft, and many large employers): the page is entirely
+  //    client-rendered — even og:title just says "Careers at <Company>" — so
+  //    the posting has to come from its API, keyed by the ?pid= in the URL.
+  const pid = u.searchParams.get("pid");
+  if (pid && /(^|\.)(apply\.careers|eightfold\.ai)/i.test(host)) {
+    type EightfoldJob = { name?: string; location?: string; t_create?: number; canonicalPositionUrl?: string };
+    const d = await getJson<{ job?: EightfoldJob } & EightfoldJob>(
+      `https://${host}/api/apply/v2/jobs/${pid}?domain=${u.searchParams.get("domain") || host.split(".").slice(-2).join(".")}`,
+    );
+    const job = d?.job ?? d;
+    if (job?.name) {
+      const brand = host.replace(/^apply\.careers\./, "").split(".")[0];
+      return {
+        company: titleCase(brand),
+        role: job.name,
+        url: job.canonicalPositionUrl || rawUrl,
+        location: job.location,
+        // t_create is epoch seconds on Eightfold.
+        postedAt: job.t_create ? iso(job.t_create * 1000) : undefined,
+        ats: "eightfold",
+      };
+    }
+  }
+
   // ── Anything else: fall back to the page's own <title>, which is usually
   //    "<Role> - <Company>" or similar. Better than an empty form.
   const res = await request(rawUrl, { timeoutMs: 15000, retries: 1 });
