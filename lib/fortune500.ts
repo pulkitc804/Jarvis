@@ -1,3 +1,5 @@
+import { isWatchlisted } from "./watchlistCompanies";
+
 /**
  * Fortune 500 companies that actually hire software / data interns.
  *
@@ -143,8 +145,12 @@ export function isNotable(company: string): boolean {
   return matches(NOTABLE_NON_F500, company);
 }
 
-/** F500 or a notable private employer — the default "worth my time" tier. */
+/**
+ * F500, a notable private employer, or on the LeetCode-companies watchlist —
+ * the tier worth surfacing. Finance is filtered out first regardless of which
+ * list a firm appears on.
+ */
 export function isTargetEmployer(company: string): boolean {
   if (financeExcluded() && isFinanceFirm(company)) return false;
-  return isFortune500(company) || isNotable(company);
+  return isFortune500(company) || isNotable(company) || isWatchlisted(company);
 }
