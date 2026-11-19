@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ClockHeader } from "@/components/ClockHeader";
 import { TodayBar } from "@/components/TodayBar";
 import { SessionLimitWidget } from "@/components/widgets/SessionLimitWidget";
@@ -14,6 +15,7 @@ export default function Home() {
   return (
     <main className="relative z-10 mx-auto w-full max-w-[1400px] px-4 sm:px-6 lg:px-8 py-6 sm:py-9">
       <ClockHeader name="Pulkit" />
+      <div className="mb-4 flex justify-end"><Link href="/ask" className="rounded-md border border-[var(--border)] px-4 py-2 text-sm">Ask Jarvis →</Link></div>
       <TodayBar />
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 auto-rows-min">
         <SessionLimitWidget />

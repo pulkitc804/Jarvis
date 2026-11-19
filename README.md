@@ -143,3 +143,26 @@ usage and integrations poll on intervals and pause when the tab is hidden.
 ---
 
 Made to be tinkered with. 🛠️
+
+## Ask Jarvis (Codex subscription)
+
+Open **Ask Jarvis** on the dashboard or visit `/ask`. The local server invokes
+`codex exec` using the CLI's existing ChatGPT login. Run `codex login` on this
+Mac if needed; no API key or copied OAuth token is required. Questions consume
+that account's Codex allowance. Set `JARVIS_CODEX_BIN` if Codex is installed
+somewhere other than `~/.npm-global/bin/codex`.
+
+Each question supplies a fresh, bounded snapshot of up to 250 visible roles
+and your task titles/statuses, plus recent messages from the current browser tab.
+The snapshot and question are sent to OpenAI. Inbox bodies, environment variables
+and credentials are excluded. Chat history is held in tab memory only.
+
+This first version answers questions and suggests next steps; it does not send
+mail, submit applications, modify files or change stages. The child process runs
+in a temporary working directory with a read-only sandbox, shell tool disabled,
+user configuration ignored, a minimal environment and a two-minute timeout.
+Only one question runs at a time. API-key auth inherited from the dashboard is
+intentionally excluded so this integration uses the CLI's own login.
+
+Validation: `npm run build`; `/ask` returns 200; invalid messages return 400;
+foreign Origins return 403; a real signed-in Codex question returns an answer.
